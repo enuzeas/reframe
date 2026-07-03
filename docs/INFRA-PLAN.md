@@ -164,11 +164,11 @@
 
 | 계층 | 방식 | 비고 |
 | --- | --- | --- |
-| Python 코드 | `pyproject.toml`으로 패키지화, `reframe-pipeline`/`reframe-api` 콘솔 스크립트 진입점 등록 | `reframe.py` 단일 스크립트 대신 `pip install -e .`로 설치, launchd plist(§5)가 경로 대신 명령어를 호출 |
-| 외부 도구(ffmpeg, mediamtx) | 저장소 루트 `Brewfile` + `brew bundle` | §11 체크리스트의 수동 나열을 명령어 한 줄로 대체, 버전 고정 |
-| 서비스 등록 | `deploy/launchd/*.plist` 템플릿 + `scripts/install-services.sh` | §5의 launchd 구조를 스크립트로 자동화, 저장소 경로만 치환 |
-| 설정값 | `~/Library/Application Support/reframe/config.yaml` (레포에 기본값, 로컬에 오버라이드) | 채널 배치·캡처 장치 인덱스 등 머신별 값 분리 (§8과 연결) |
-| 모델 가중치 | YOLO11n 체크포인트 해시를 레포에 명시 | Ultralytics가 첫 실행 시 자동 다운로드 — 재설치 시 다른 버전이 조용히 섞이는 것 방지 |
+| Python 코드 | `pyproject.toml`(setuptools, `py-modules`)으로 패키지화, 콘솔 진입점 `reframe` 1개 등록 | `pip install -e .`로 설치. `reframe-pipeline`/`reframe-api` 분리는 그 프로세스들이 실제로 생기는 M3/M4 이후에 나눔(코드는 여전히 형제 모듈 파일들, `src/` 레이아웃도 그때 재검토) |
+| 외부 도구(ffmpeg, mediamtx) | 저장소 루트 `Brewfile` + `brew bundle` | §11 체크리스트의 수동 나열을 명령어 한 줄로 대체, 버전 고정. 아직 어떤 코드도 안 씀(M3에서 사용 시작) |
+| 서비스 등록 | `deploy/launchd/*.plist` 템플릿 + `scripts/install-services.sh` | §5의 launchd 구조를 스크립트로 자동화 — M6에서 실제 서비스(pipeline/encode/api)가 생긴 뒤 작성 |
+| 설정값 | `~/Library/Application Support/reframe/config.yaml` (레포에 기본값, 로컬에 오버라이드) | 채널 배치·캡처 장치 인덱스 등 머신별 값 분리(§8) — 채널/UI 백엔드가 생기는 M4~M5 이후에 의미가 있어 아직 안 만듦 |
+| 모델 가중치 | `yolov8n.pt` sha256 `f59b3d83...fc83b36` (2026-07-04 다운로드분) | 계획 초안은 YOLO11n을 가정했지만 프로토타입 기본값은 `yolov8n.pt` — PLAN.md §3.1의 YOLO11n 전환은 아직 미착수, 전환 시 이 해시도 갱신할 것. 파일 자체는 `.gitignore`(`*.pt`)로 커밋 제외, Ultralytics가 첫 실행 시 자동 다운로드 |
 
 업그레이드 경로: 운영 머신 수가 늘거나 비개발자가 설치해야 하는 상황이 실제로 생기면, 그때
 Homebrew tap(`brew install reframe`) 또는 서명된 `.app`으로 승격한다 — 지금은 조건이

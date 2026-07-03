@@ -10,6 +10,10 @@ Usage:
   python reframe.py --src 0            # camera index
   python reframe.py --src video.mp4    # file (simulates live)
   python reframe.py --self-test
+
+Code is split by feature: smoothing.py (One Euro Filter), geometry.py (crop math),
+detection.py (YOLO+ByteTrack), tracking.py (slots/hold-on-loss), modes.py (the 3
+render modes), display.py (debug compositing). This file is just the CLI entrypoint.
 """
 import argparse
 import sys
@@ -18,140 +22,17 @@ import time
 import cv2
 import numpy as np
 
-HD_W, HD_H = 1920, 1080
-DETECT_W = 960          # detection runs on this width, crops come from the source frame
-EMA_ALPHA = 0.15        # ponytail: EMA + deadzone smoothing; upgrade to One-Euro filter if jitter matters
-DEADZONE = 40           # px in source coords; moves smaller than this are ignored
-MODE_NAMES = {1: "MULTI", 2: "QUAD+TRACK", 3: "SINGLE"}
+from detection import detect_people
+from display import composite
+from geometry import HD_H, HD_W, clamp_window, crop_hd
+from modes import render_multi, render_quad, render_single
+from output import RTSPPublisher
+from smoothing import Smoother
+from tracking import Presence, SlotManager
 
-
-class Smoother:
-    """Per-track EMA smoothing with a deadzone so crops don't jitter."""
-
-    def __init__(self, alpha=EMA_ALPHA, deadzone=DEADZONE):
-        self.alpha = alpha
-        self.deadzone = deadzone
-        self.pos = {}
-
-    def update(self, key, cx, cy):
-        if key not in self.pos:
-            self.pos[key] = (float(cx), float(cy))
-            return self.pos[key]
-        px, py = self.pos[key]
-        if abs(cx - px) < self.deadzone and abs(cy - py) < self.deadzone:
-            return px, py
-        nx = px + self.alpha * (cx - px)
-        ny = py + self.alpha * (cy - py)
-        self.pos[key] = (nx, ny)
-        return nx, ny
-
-    def drop_except(self, keys):
-        self.pos = {k: v for k, v in self.pos.items() if k in keys}
-
-
-def clamp_window(cx, cy, cw, ch, fw, fh):
-    """Clamp a cw x ch window centered at (cx, cy) inside a fw x fh frame."""
-    cw, ch = min(cw, fw), min(ch, fh)
-    x = int(round(cx - cw / 2))
-    y = int(round(cy - ch / 2))
-    x = max(0, min(x, fw - cw))
-    y = max(0, min(y, fh - ch))
-    return x, y, int(cw), int(ch)
-
-
-def crop_hd(frame, cx, cy, ch):
-    """Crop a 16:9 window of height ch centered at (cx, cy), resized to HD."""
-    fh, fw = frame.shape[:2]
-    cw = ch * 16 / 9
-    x, y, w, h = clamp_window(cx, cy, cw, ch, fw, fh)
-    return cv2.resize(frame[y:y + h, x:x + w], (HD_W, HD_H), interpolation=cv2.INTER_LINEAR)
-
-
-def placeholder(label):
-    img = np.full((HD_H, HD_W, 3), 32, np.uint8)
-    cv2.putText(img, label, (60, HD_H // 2), cv2.FONT_HERSHEY_SIMPLEX, 2, (200, 200, 200), 3)
-    return img
-
-
-def detect_people(model, frame):
-    """Run tracking on a downscaled frame, return [(tid, x1, y1, x2, y2)] in source coords, largest first."""
-    fh, fw = frame.shape[:2]
-    scale = DETECT_W / fw
-    small = cv2.resize(frame, (DETECT_W, int(fh * scale)))
-    res = model.track(small, persist=True, classes=[0], verbose=False)[0]
-    people = []
-    if res.boxes is not None and res.boxes.id is not None:
-        for box, tid in zip(res.boxes.xyxy.cpu().numpy(), res.boxes.id.int().cpu().numpy()):
-            x1, y1, x2, y2 = box / scale
-            people.append((int(tid), x1, y1, x2, y2))
-    people.sort(key=lambda p: (p[3] - p[1]) * (p[4] - p[2]), reverse=True)
-    return people
-
-
-def track_crop(frame, smoother, key, bbox, zoom=1.6):
-    """HD crop following a person bbox; zoom = window height as multiple of person height."""
-    _, x1, y1, x2, y2 = bbox
-    cx, cy = smoother.update(key, (x1 + x2) / 2, (y1 + y2) / 2)
-    return crop_hd(frame, cx, cy, max((y2 - y1) * zoom, HD_H))
-
-
-def render_multi(frame, people, smoother):
-    # ponytail: slot = track-id order; ids only grow, so tiles stay put until someone leaves.
-    # Upgrade to sticky slot assignment if tile shuffling bothers you.
-    chosen = sorted(people[:4], key=lambda p: p[0])
-    smoother.drop_except({p[0] for p in chosen})
-    tiles = [track_crop(frame, smoother, p[0], p) for p in chosen]
-    while len(tiles) < 4:
-        tiles.append(placeholder("no subject"))
-    return tiles
-
-
-def render_quad(frame, people, smoother):
-    fh, fw = frame.shape[:2]
-    hw, hh = fw // 2, fh // 2
-    quads = [frame[:hh, :hw], frame[:hh, hw:], frame[hh:, :hw]]
-    tiles = [cv2.resize(q, (HD_W, HD_H)) for q in quads]
-    if people:
-        tiles.append(track_crop(frame, smoother, "quad-main", people[0]))
-    else:
-        tiles.append(placeholder("no subject"))
-    return tiles
-
-
-def render_single(frame, people, smoother):
-    if not people:
-        return [cv2.resize(frame, (HD_W, HD_H))] + [placeholder("no subject")] * 3
-    p = people[0]
-    _, x1, y1, x2, y2 = p
-    h = y2 - y1
-    bx = (x1 + x2) / 2
-    cx, _ = smoother.update("single", bx, (y1 + y2) / 2)
-    dx = cx - bx  # reuse one smoothed offset for every framing
-    framings = [
-        (bx + dx, y1 + h * 0.50, h * 1.3),   # full body
-        (bx + dx, y1 + h * 0.35, h * 0.7),   # waist-up
-        (bx + dx, y1 + h * 0.15, h * 0.35),  # face close-up (upscales, unavoidable)
-    ]
-    tiles = [cv2.resize(frame, (HD_W, HD_H))]
-    tiles += [crop_hd(frame, fx, fy, max(fh_, 240)) for fx, fy, fh_ in framings]
-    return tiles
-
-
-def composite(tiles, mode, fps):
-    labels = {
-        1: ["person 1", "person 2", "person 3", "person 4"],
-        2: ["quad TL", "quad TR", "quad BL", "track"],
-        3: ["wide", "full", "waist", "face"],
-    }[mode]
-    cells = []
-    for tile, label in zip(tiles, labels):
-        cell = cv2.resize(tile, (960, 540))
-        cv2.putText(cell, label, (16, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-        cells.append(cell)
-    grid = np.vstack([np.hstack(cells[:2]), np.hstack(cells[2:])])
-    cv2.putText(grid, f"[{MODE_NAMES[mode]}]  {fps:.0f} fps  keys: 1/2/3 mode, q quit",
-                (16, 1060), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-    return grid
+DETECT_EVERY = 2        # ponytail: measured on M-series+MPS, 4K synthetic video (2026-07-04) -
+                        # every=1 -> 15.6fps (misses 30fps target), every=2 -> 39.6fps.
+                        # CoreML export skipped: this knob alone clears the target.
 
 
 def main():
@@ -159,6 +40,10 @@ def main():
     ap.add_argument("--src", default="0", help="camera index or video file")
     ap.add_argument("--mode", type=int, default=1, choices=[1, 2, 3])
     ap.add_argument("--model", default="yolov8n.pt")
+    ap.add_argument("--detect-every", type=int, default=DETECT_EVERY,
+                     help="run YOLO every Nth frame, reusing the last boxes in between")
+    ap.add_argument("--rtsp-out", help="rtsp:// URL to publish tile 0 to (e.g. rtsp://localhost:8554/out1)")
+    ap.add_argument("--no-preview", action="store_true", help="skip the cv2 debug window")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
 
@@ -166,8 +51,10 @@ def main():
         self_test()
         return
 
+    import torch
     from ultralytics import YOLO
     model = YOLO(args.model)
+    device = "mps" if torch.backends.mps.is_available() else "cpu"
 
     src = int(args.src) if args.src.isdigit() else args.src
     cap = cv2.VideoCapture(src)
@@ -178,29 +65,44 @@ def main():
         sys.exit(f"cannot open source: {args.src}")
 
     mode = args.mode
-    smoother = Smoother()
-    render = {1: render_multi, 2: render_quad, 3: render_single}
+    smoother, slots, presence = Smoother(), SlotManager(), Presence()
     fps, t0 = 0.0, time.time()
+    people, frame_idx = [], 0
+    publisher = RTSPPublisher(args.rtsp_out, fps=cap.get(cv2.CAP_PROP_FPS) or 30) if args.rtsp_out else None
 
     while True:
         ok, frame = cap.read()
         if not ok:
             break
-        people = detect_people(model, frame)
-        tiles = render[mode](frame, people, smoother)
-        cv2.imshow("reframe", composite(tiles, mode, fps))
+        if frame_idx % args.detect_every == 0:
+            people = detect_people(model, frame, device=device)
+        frame_idx += 1
+
+        if mode == 1:
+            tiles = render_multi(frame, people, smoother, slots)
+        elif mode == 2:
+            tiles = render_quad(frame, people, smoother, presence)
+        else:
+            tiles = render_single(frame, people, smoother, presence)
+
+        if publisher:
+            publisher.write(tiles[0])
+        if not args.no_preview:
+            cv2.imshow("reframe", composite(tiles, mode, fps))
 
         dt, t0 = time.time() - t0, time.time()
         fps = 0.9 * fps + 0.1 * (1 / dt) if dt > 0 else fps
-        key = cv2.waitKey(1) & 0xFF
+        key = cv2.waitKey(1) & 0xFF if not args.no_preview else -1
         if key == ord("q"):
             break
         if key in (ord("1"), ord("2"), ord("3")):
             mode = int(chr(key))
-            smoother = Smoother()
+            smoother, slots, presence = Smoother(), SlotManager(), Presence()
 
     cap.release()
     cv2.destroyAllWindows()
+    if publisher:
+        publisher.close()
 
 
 def self_test():
@@ -208,15 +110,44 @@ def self_test():
     assert clamp_window(0, 0, 1920, 1080, 3840, 2160) == (0, 0, 1920, 1080)
     assert clamp_window(3840, 2160, 1920, 1080, 3840, 2160) == (1920, 1080, 1920, 1080)
     assert clamp_window(1920, 1080, 9999, 9999, 3840, 2160) == (0, 0, 3840, 2160)
-    # smoother: deadzone holds, big moves converge toward target
-    s = Smoother(alpha=0.5, deadzone=10)
-    assert s.update("a", 100, 100) == (100, 100)
-    assert s.update("a", 105, 105) == (100, 100)          # inside deadzone
-    nx, ny = s.update("a", 300, 100)
-    assert 100 < nx < 300 and ny == 100                    # moved toward target
+    # non-integer crop width hitting the frame edge must not leak a float into x/y
+    # (regression: crashed frame[y:y+h, x:x+w] slicing with SINGLE mode's face close-up)
+    x, y, _, _ = clamp_window(3840, 1080, 1000.7, 562.5, 3840, 2160)
+    assert isinstance(x, int) and isinstance(y, int)
+    # smoother: One Euro Filter lags toward a step change, then converges (t is explicit
+    # so the test doesn't depend on real elapsed wall-clock time between calls)
+    s = Smoother(min_cutoff=1.0, beta=0.0)
+    t = 0.0
+    assert s.update("a", 100, 100, t) == (100, 100)         # first sample: no history yet
+    t += 1 / 30
+    nx, ny = s.update("a", 300, 100, t)
+    assert 100 < nx < 300 and ny == 100                     # lagged toward target, not snapped
+    for _ in range(60):
+        t += 1 / 30
+        nx, ny = s.update("a", 300, 100, t)
+    assert abs(nx - 300) < 1                                # converges after enough frames
+    # scalar smoothing (used for zoom-rate limiting) behaves the same way
+    assert s.scalar("a:h", 1000, t) == 1000                 # first sample: no history yet
+    t += 1 / 30
+    assert s.scalar("a:h", 400, t) > 400                    # lagged toward smaller target
+    s.drop_except(set())
+    assert s.filters == {}
     # crop_hd output shape
     frame = np.zeros((2160, 3840, 3), np.uint8)
     assert crop_hd(frame, 0, 0, 1080).shape == (HD_H, HD_W, 3)
+    # slot manager: a leaving occupant frees its own slot, doesn't reshuffle the rest
+    sm = SlotManager(n=4)
+    assert sm.assign([3, 7, 12, 20]) == [3, 7, 12, 20]
+    assert sm.assign([3, 12, 20]) == [3, None, 12, 20]      # 7 left -> its slot empties
+    assert sm.assign([3, 12, 20, 99]) == [3, 99, 12, 20]    # newcomer fills the empty slot
+    # presence: holds last bbox and widens while missing, then finally lets go
+    pr = Presence(hold_frames=2)
+    bbox = (1, 0, 0, 100, 100)
+    assert pr.resolve("x", bbox) == (bbox, 1.0)
+    held, widen = pr.resolve("x", None)
+    assert held == bbox and widen > 1.0                     # held + widening
+    pr.resolve("x", None)
+    assert pr.resolve("x", None) == (None, 1.0)             # hold window expired
     print("self-test OK")
 
 
