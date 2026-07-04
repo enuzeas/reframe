@@ -137,10 +137,6 @@ indices aren't stable across sessions). Delete that file to reset to the startup
 | `output.py` | `RTSPPublisher` (ffmpeg/MediaMTX) + `NDIPublisher` (cyndilib) |
 | `mediamtx.yml` | MediaMTX config — RTSP over TCP (UDP reproduces a stuck-frame bug here) |
 | `scripts/` | `install-services.sh` / `uninstall-services.sh` |
-| `docs/` | Design + rollout: `ROADMAP`, `PLAN`, `UI-PLAN`, `INFRA-PLAN`, `next`, `walkthrough` |
-
-Start at [docs/walkthrough.md](docs/walkthrough.md) for a runnable tour, or
-[docs/next.md](docs/next.md) for the current state and every fix's rationale.
 
 ## Notes
 

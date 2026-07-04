@@ -7,3 +7,6 @@ __pycache__/
 # mediamtx auto-generates these (RTSPS TLS) when run from this dir
 auto.crt
 auto.key
+
+# design/rollout docs kept local, not published (see chat 2026-07-05)
+docs/
