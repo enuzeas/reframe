@@ -384,10 +384,12 @@ def self_test():
     assert r.status_code == 200
     assert cmdq.drain() == [{"type": "switch_input", "source_id": 1, "width": 1920, "height": 1080}]
 
-    # audio mux: video-only cmd unchanged (no regression), audio_src adds a second
-    # avfoundation input + Opus encode + wallclock timestamps on both (A/V sync)
+    # video always gets wallclock timestamps (declared fps is the camera's nominal rate,
+    # not the pipeline's actual throughput - without this the encoder's PTS runs ahead
+    # of real time and live players stall after the first frame). audio_src adds a
+    # second avfoundation input + Opus encode, wallclock only on the video side.
     plain = rtsp_cmd("rtsp://x/out1", fps=30)
-    assert "-use_wallclock_as_timestamps" not in plain and "-c:a" not in plain
+    assert plain.count("-use_wallclock_as_timestamps") == 1 and "-c:a" not in plain
     muxed = rtsp_cmd("rtsp://x/out1", fps=30, audio_src=2)
     assert muxed.count("-use_wallclock_as_timestamps") == 1  # video input only, not audio
     assert "avfoundation" in muxed and ":2" in muxed and "libopus" in muxed

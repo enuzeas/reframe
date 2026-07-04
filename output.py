@@ -11,19 +11,22 @@ def rtsp_cmd(url, fps=30, audio_src=None):
     """Build the ffmpeg argv for RTSPPublisher. Split out so self-tests can check
     the audio branch without actually spawning ffmpeg."""
     cmd = ["ffmpeg", "-loglevel", "error", "-y",
-           "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{HD_W}x{HD_H}", "-r", str(fps)]
+           "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{HD_W}x{HD_H}", "-r", str(fps),
+           # -use_wallclock_as_timestamps on the video (stdin) input: `fps` here is the
+           # camera's nominal rate (e.g. 60), not what the pipeline actually delivers once
+           # detection is running (often much lower, ~15-20 with 4 channels + YOLO). Without
+           # this flag ffmpeg assumes a constant `fps` and timestamps frames by frame count
+           # alone, so its encoded PTS runs far ahead of real time - live players (confirmed
+           # with IINA) show the first frame then stall, waiting for "future" PTS to become
+           # due as real frames trickle in slower than declared. Wallclock timestamps each
+           # frame by when it actually arrived instead.
+           "-use_wallclock_as_timestamps", "1", "-i", "-"]
     if audio_src is not None:
-        # -use_wallclock_as_timestamps only on the video (stdin) input, which has no
-        # clock of its own - without it, frames would get assumed-constant-rate
-        # timestamps that drift from when they actually arrive. The avfoundation
-        # audio input already carries its own accurate hardware capture clock;
-        # overriding it with wallclock too made libopus see occasional out-of-order
-        # ("Queue input is backward in time") timestamps and silently drop those
-        # frames - confirmed by removing it here and watching the warning disappear.
-        cmd += ["-use_wallclock_as_timestamps", "1", "-i", "-",
-                "-f", "avfoundation", "-i", f":{audio_src}"]
-    else:
-        cmd += ["-i", "-"]
+        # avfoundation audio already has its own accurate hardware capture clock - adding
+        # wallclock there too made libopus see occasional out-of-order ("Queue input is
+        # backward in time") timestamps and silently drop those frames, confirmed by
+        # removing it here and watching the warning disappear.
+        cmd += ["-f", "avfoundation", "-i", f":{audio_src}"]
     cmd += ["-c:v", "h264_videotoolbox", "-realtime", "true", "-bf", "0", "-g", str(fps), "-b:v", "8M"]
     if audio_src is not None:
         cmd += ["-c:a", "libopus", "-b:a", "128k", "-ar", "48000"]
