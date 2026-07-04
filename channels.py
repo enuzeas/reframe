@@ -83,6 +83,16 @@ def render_channel(frame, people_by_id, channel):
     cx, cy = channel.smoother.update(key, (x1 + x2) / 2, (y1 + y2) / 2)
     target_h = ZOOM_MULT[channel.zoom] * (y2 - y1) if channel.zoom in ZOOM_MULT else channel.h
     ch_h = channel.smoother.scalar(f"{key}:h", max(target_h, fh * MIN_CROP_FRACTION) * widen)
+    # Centering on the whole body's midpoint works for "full", but a tight crop (waist/
+    # face) centered there is roughly torso-height, not anywhere near the head - a person
+    # detector only gives a whole-body box, no separate head position, so a small crop
+    # naively centered on it can cut the top of the head off entirely. Bias upward: cap
+    # how low the crop center is allowed to sit so the top of the crop window never
+    # drops below a margin above the head (y1). Only actually pulls cy up when the zoom
+    # is tight enough for this to matter - "full" crops are already ~body-height and
+    # rarely hit this clamp.
+    head_margin = 0.1 * (y2 - y1)
+    cy = min(cy, y1 + ch_h / 2 - head_margin)
     tile = crop_hd(frame, cx, cy, ch_h)
     channel.x, channel.y, channel.w, channel.h = clamp_window(cx, cy, ch_h * 16 / 9, ch_h, fw, fh)
     return tile
