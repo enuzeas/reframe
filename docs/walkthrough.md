@@ -8,9 +8,9 @@
 | 것 | 실체 | 안 되는 것 |
 |---|---|---|
 | [reframe.py](../reframe.py) | 4K→HD 3모드 크롭 CLI 진입점 (cv2 창에 2×2 프리뷰, `--rtsp-out`/`--ndi-out`으로 1채널 송출도 가능). 기능별로 [smoothing.py](../smoothing.py)/[geometry.py](../geometry.py)/[detection.py](../detection.py)/[tracking.py](../tracking.py)/[modes.py](../modes.py)/[display.py](../display.py)/[output.py](../output.py)로 분리돼 있음 | 4채널 동시 송출, 웹 컨트롤, 오디오 먹싱 — 이건 `reframe-server` 몫 |
-| [server.py](../server.py) | `reframe-server` — FastAPI 컨트롤 서버. 캡처+추론 루프를 백그라운드 스레드로 돌리며 4채널 RTSP/NDI 동시 송출 + MJPEG 프리뷰 + WebSocket 오버레이 + 입력 소스/해상도 전환 API | 크롭 편집·트래킹 바인딩(M5), 오디오, 프로세스 분리(M6) |
-| [console/index.html](../console/index.html) | `reframe-server`용 읽기 전용 콘솔 — MJPEG 프리뷰 위 캔버스 오버레이(감지 박스) + 썸네일 기반 카메라/해상도 선택 | 편집 불가(읽기 전용) — [mockup/index.html](../mockup/index.html)이 그 시뮬레이션 담당 |
-| [mockup/index.html](../mockup/index.html) | UI-PLAN.md 편집 인터랙션을 확인하기 위한 정적 목업 (더미 인물이 움직임) | 실제 파이프라인과 연결 안 됨 — 클릭하면 캔버스 안에서만 반응(M5에서 실배선 대상) |
+| [server.py](../server.py) + [channels.py](../channels.py) | `reframe-server` — FastAPI 컨트롤 서버. 캡처+추론 루프를 백그라운드 스레드로 돌리며 동적 채널(최대 4) RTSP/NDI 송출 + MJPEG 프리뷰(원본 다운스케일) + WebSocket 오버레이 + 채널 CRUD/프리셋/트래킹 바인딩/입력 소스 전환 API | 오디오, 프로세스 분리(M6) |
+| [console/index.html](../console/index.html) | `reframe-server`용 편집 콘솔 — 크롭 드래그/리사이즈, 인물 클릭 바인딩, 트래킹/줌/스무딩, 프리셋, 채널 추가/삭제, 카메라/해상도 선택 | 실제 마우스 조작은 이번 세션에 브라우저로 직접 확인 안 함(API 경로만 검증) |
+| [mockup/index.html](../mockup/index.html) | UI-PLAN.md 인터랙션을 처음 검증했던 정적 목업(더미 인물, 시뮬레이션 데이터) — `console/index.html`이 실배선판이 된 뒤로는 참고용 | 실제 파이프라인과 연결 안 됨(원래도 그 목적이 아니었음) |
 | [docs/pdf/UI-PLAN.pdf](pdf/UI-PLAN.pdf) | UI-PLAN.md를 인쇄한 스냅샷 | 최신 UI-PLAN.md 수정을 반영 안 함 — 필요하면 재출력 |
 
 ## 1. 파이프라인 프로토타입 돌리기
@@ -77,7 +77,7 @@ RTSP와 동시에 켜도 된다 (`--rtsp-out`과 `--ndi-out`을 같이 넘기면
 NDI SDK(`libndi.dylib`)는 brew로 안 깔린다 — proprietary 배포판이라 [NDI Tools](https://ndi.video/tools/)로
 따로 설치해야 한다(이 머신은 이미 설치돼 있음). `cyndilib`(pip 패키지)는 그 SDK를 링크만 한다.
 
-## 1d. 컨트롤 서버로 4채널 동시 송출 + 읽기 전용 콘솔 (M4)
+## 1d. 컨트롤 서버로 4채널 동시 송출 + 편집 콘솔 (M4+M5)
 
 ```bash
 mediamtx /tmp/mediamtx.yml   # RTSP 쓸 거면 (1b 참고)
@@ -86,22 +86,29 @@ reframe-server --src 0 --mode 1 \
   --ndi-out-base reframe-out
 ```
 
-`out1..out4`(RTSP) / `reframe-out1..4`(NDI) 4채널이 각각 독립적으로 뜬다 — OBS에서 채널당
-하나씩 소스로 추가하면 4개 화면을 동시에 받을 수 있다(1b/1c와 같은 방식, 채널 수만 4개).
+`out1..out4`(RTSP) / `reframe-out1..4`(NDI) 채널이 각각 독립적으로 뜬다(1~4개, 채널을
+추가/삭제하면 그만큼 늘거나 준다) — OBS에서 채널당 하나씩 소스로 추가하면 동시에 받을 수
+있다(1b/1c와 같은 방식).
 
 브라우저로 `console/index.html`을 열면(정적 파일이라 `open console/index.html`로 바로 열어도
-되고, `/api/*` 호출은 절대경로라 `http://localhost:8000`을 향한다) 라이브 프리뷰(2×2 합성)와
-감지 박스 오버레이, 카메라/해상도 선택 UI를 볼 수 있다 — **읽기 전용**, 크롭 이동/리사이즈는
-아직 안 됨(M5).
+되고, `/api/*` 호출은 절대경로라 `http://localhost:8000`을 향한다) 라이브 프리뷰(원본
+다운스케일) 위에 감지 박스+채널 크롭 사각형 오버레이가 보인다. **이제 편집 가능**:
 
-API만 확인하고 싶으면:
+- 크롭 사각형 드래그로 이동, 모서리로 리사이즈(트래킹 OFF 채널만)
+- 트래킹 ON인데 대상 미지정 채널이 있으면, 프리뷰의 인물 점선 박스를 클릭해 바인딩
+- 카드에서 트래킹 토글·줌 프리셋(수동/풀샷/웨이스트업/페이스)·스무딩 슬라이더·삭제
+- 하단 MULTI/QUAD/SINGLE 버튼으로 채널 4개 일괄 재구성
+- 최대 4채널, "+ 프레임 추가"로 새 채널 생성
+
+API로 직접 조작하고 싶으면:
 
 ```bash
-curl localhost:8000/api/state
-curl localhost:8000/api/sources
+curl localhost:8000/api/channels
+curl -X PATCH localhost:8000/api/channels/1 -H 'Content-Type: application/json' -d '{"target_id": 7}'
+curl -X POST localhost:8000/api/preset/single
 ```
 
-`reframe-server --self-test`로 카메라 없이 API 응답 형태만 빠르게 회귀 테스트할 수 있다.
+`reframe-server --self-test`로 카메라 없이 채널 CRUD + 렌더 로직 회귀 테스트를 빠르게 돌릴 수 있다.
 
 ## 2. UI 목업 열어보기
 
@@ -127,9 +134,10 @@ open /Users/enujes/Sync/dev/reframe/mockup/index.html
 
 - 오디오 먹싱 — 캡처카드 오디오 입력 필요, 미착수(M3 나머지)
 - Syphon 연동 — obs-syphon 플러그인 없음, NDI로 대체 완료(§1c)
-- 크롭 편집(이동/리사이즈/삭제/추가), 트래킹 바인딩 UI — `console/index.html`은 읽기 전용,
-  `mockup/index.html`의 인터랙션과 실제 파이프라인 연결은 미착수(M5)
 - launchd 서비스, pipeline/api 프로세스 분리 — 미착수(M6, INFRA-PLAN.md §2 각주)
+- `console/index.html`의 드래그/리사이즈를 실제 마우스로 조작해보는 육안 확인 — API/백엔드
+  경로는 curl로 검증했지만 브라우저 조작 자체는 이번 세션에 직접 해보지 않음
 
 `pyproject.toml` 패키징(M2), RTSP·NDI 1채널 송출(M3), 줌/패닝 육안 검증(M3, 실 4K 카메라로
-완료), 4채널 컨트롤 서버(M4)는 전부 완료됐다 — 위 §1~§1d가 그 결과.
+완료), 4채널 컨트롤 서버(M4), 크롭 편집·트래킹 바인딩 API 연동(M5)은 전부 완료됐다 —
+위 §1~§1d가 그 결과.

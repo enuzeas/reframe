@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """reframe-server: FastAPI control server for the reframe pipeline.
 
-Read-only console (M4): live preview (MJPEG) + detection/overlay data (WebSocket)
-+ input source/resolution switching. Crop editing and tracking rebinding stay
-CLI/config-only until M5.
+Editable console (M5): live preview (MJPEG, raw downscaled feed) + detection/
+crop overlay data (WebSocket) + input source/resolution switching + channel
+CRUD (crop move/resize/delete/add, tracking bind, zoom preset, smoothing) +
+MULTI/QUAD/SINGLE presets. Matches the interaction mockup/index.html already
+validated with simulated data (UI-PLAN.md §2-3) - channels.py is the real
+version of that model.
 
 Single process: the capture/detect/track/render loop runs in a background
 thread, FastAPI/uvicorn runs the asyncio side. docs/INFRA-PLAN.md §2 originally
@@ -24,17 +27,16 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
 
 import sources
+from channels import PRESETS, Channel, next_channel_id, render_channels
 from detection import detect_people
-from display import composite
-from modes import render_multi, render_quad, render_single
 from output import NDIPublisher, RTSPPublisher
-from smoothing import Smoother
 from state import CommandQueue, PipelineState
-from tracking import Presence, SlotManager
 
 DETECT_EVERY = 2
 MJPEG_FPS = 12
 OVERLAY_HZ = 10
+PREVIEW_MAX_WIDTH = 1280
+MODE_TO_PRESET = {1: "multi", 2: "quad", 3: "single"}
 
 
 def mjpeg_chunk(state: PipelineState):
@@ -60,7 +62,7 @@ def make_app(state: PipelineState, cmdq: CommandQueue) -> FastAPI:
     @app.get("/api/state")
     def get_state():
         _, overlay, source_id = state.snapshot()
-        return {"mode": overlay.get("mode"), "fps": overlay.get("fps"), "source_id": source_id}
+        return {"fps": overlay.get("fps"), "source_id": source_id}
 
     @app.get("/api/sources")
     def get_sources():
@@ -89,6 +91,34 @@ def make_app(state: PipelineState, cmdq: CommandQueue) -> FastAPI:
         })
         return {"ok": True}
 
+    @app.get("/api/channels")
+    def get_channels():
+        _, overlay, _ = state.snapshot()
+        return overlay.get("channels", [])
+
+    @app.post("/api/channels")
+    async def post_channel(body: dict):
+        cmdq.put({"type": "add_channel", "x": body.get("x", 0), "y": body.get("y", 0),
+                   "w": body.get("w", 1440), "h": body.get("h", 1440 * 9 / 16)})
+        return {"ok": True}
+
+    @app.patch("/api/channels/{channel_id}")
+    async def patch_channel(channel_id: int, body: dict):
+        cmdq.put({"type": "update_channel", "id": channel_id, **body})
+        return {"ok": True}
+
+    @app.delete("/api/channels/{channel_id}")
+    async def delete_channel(channel_id: int):
+        cmdq.put({"type": "delete_channel", "id": channel_id})
+        return {"ok": True}
+
+    @app.post("/api/preset/{name}")
+    async def post_preset(name: str):
+        if name not in PRESETS:
+            return Response(status_code=404)
+        cmdq.put({"type": "preset", "name": name})
+        return {"ok": True}
+
     @app.get("/api/preview.mjpg")
     def get_preview():
         def gen():
@@ -113,17 +143,70 @@ def make_app(state: PipelineState, cmdq: CommandQueue) -> FastAPI:
     return app
 
 
-def _build_publishers(rtsp_base, ndi_base, fps):
-    """One publisher list per output channel (1..4), URL/name suffixed by channel number."""
-    channels = []
-    for i in range(1, 5):
-        pubs = []
-        if rtsp_base:
-            pubs.append(RTSPPublisher(f"{rtsp_base}{i}", fps=fps))
-        if ndi_base:
-            pubs.append(NDIPublisher(f"{ndi_base}{i}", fps=fps))
-        channels.append(pubs)
-    return channels
+def _downscale(frame, max_width=PREVIEW_MAX_WIDTH):
+    h, w = frame.shape[:2]
+    if w <= max_width:
+        return frame
+    return cv2.resize(frame, (max_width, int(h * max_width / w)))
+
+
+def _normalized_channel(c, fw, fh):
+    d = c.to_dict()
+    d["x"], d["y"], d["w"], d["h"] = d["x"] / fw, d["y"] / fh, d["w"] / fw, d["h"] / fh
+    return d
+
+
+class ChannelOutputs:
+    """Opens/closes RTSP/NDI publishers per channel id as channels are added/removed."""
+
+    def __init__(self, rtsp_base, ndi_base, fps):
+        self.rtsp_base, self.ndi_base, self.fps = rtsp_base, ndi_base, fps
+        self.by_id = {}
+
+    def sync(self, channel_ids):
+        for cid in list(self.by_id):
+            if cid not in channel_ids:
+                for pub in self.by_id.pop(cid):
+                    pub.close()
+        for cid in channel_ids:
+            if cid not in self.by_id:
+                pubs = []
+                if self.rtsp_base:
+                    pubs.append(RTSPPublisher(f"{self.rtsp_base}{cid}", fps=self.fps))
+                if self.ndi_base:
+                    pubs.append(NDIPublisher(f"{self.ndi_base}{cid}", fps=self.fps))
+                self.by_id[cid] = pubs
+
+    def write(self, channel_id, tile):
+        for pub in self.by_id.get(channel_id, []):
+            pub.write(tile)
+
+    def close_all(self):
+        for pubs in self.by_id.values():
+            for pub in pubs:
+                pub.close()
+
+
+def _apply_command(cmd, channel_list, people, fw, fh):
+    """Mutates channel_list in place per command; returns nothing."""
+    if cmd["type"] == "add_channel":
+        cid = next_channel_id(channel_list)
+        if cid is None:
+            return
+        channel_list.append(Channel(cid, cmd["x"], cmd["y"], cmd["w"], cmd["h"]))
+    elif cmd["type"] == "update_channel":
+        c = next((c for c in channel_list if c.id == cmd["id"]), None)
+        if c is None:
+            return
+        for field in ("x", "y", "w", "h", "tracking", "target_id", "zoom"):
+            if field in cmd:
+                setattr(c, field, cmd[field])
+        if "smoothing" in cmd:
+            c.set_smoothing(cmd["smoothing"])
+    elif cmd["type"] == "delete_channel":
+        channel_list[:] = [c for c in channel_list if c.id != cmd["id"]]
+    elif cmd["type"] == "preset":
+        channel_list[:] = PRESETS[cmd["name"]](people, fw, fh)
 
 
 def pipeline_loop(args, state: PipelineState, cmdq: CommandQueue, stop_event: threading.Event):
@@ -145,78 +228,125 @@ def pipeline_loop(args, state: PipelineState, cmdq: CommandQueue, stop_event: th
     state.update(source_id=src if isinstance(src, int) else None)
 
     out_fps = cap.get(cv2.CAP_PROP_FPS) or 30
-    channel_publishers = _build_publishers(args.rtsp_out_base, args.ndi_out_base, out_fps)
+    outputs = ChannelOutputs(args.rtsp_out_base, args.ndi_out_base, out_fps)
 
-    smoother, slots, presence = Smoother(), SlotManager(), Presence()
+    channel_list = None  # built from the startup preset once we know the frame size
     fps, t0 = 0.0, time.time()
     people, frame_idx = [], 0
 
     while not stop_event.is_set():
+        ok, frame = cap.read()
+        if not ok:
+            time.sleep(0.1)
+            continue
+        fh, fw = frame.shape[:2]
+
+        if channel_list is None:
+            channel_list = PRESETS[MODE_TO_PRESET[args.mode]]([], fw, fh)
+
         for cmd in cmdq.drain():
             if cmd["type"] == "switch_input":
                 cap.release()
                 cap = open_capture(cmd["source_id"], cmd.get("width"), cmd.get("height"))
                 state.update(source_id=cmd["source_id"])
-                smoother, slots, presence = Smoother(), SlotManager(), Presence()
-
-        ok, frame = cap.read()
-        if not ok:
-            time.sleep(0.1)
-            continue
+            else:
+                _apply_command(cmd, channel_list, people, fw, fh)
 
         if frame_idx % args.detect_every == 0:
             people = detect_people(model, frame, device=device)
         frame_idx += 1
 
-        if args.mode == 1:
-            tiles = render_multi(frame, people, smoother, slots)
-        elif args.mode == 2:
-            tiles = render_quad(frame, people, smoother, presence)
-        else:
-            tiles = render_single(frame, people, smoother, presence)
-
-        for tile, pubs in zip(tiles, channel_publishers):
-            for pub in pubs:
-                pub.write(tile)
+        tiles = render_channels(frame, people, channel_list)
+        outputs.sync([c.id for c in channel_list])
+        for c in channel_list:
+            outputs.write(c.id, tiles[c.id])
 
         dt, t0 = time.time() - t0, time.time()
         fps = 0.9 * fps + 0.1 * (1 / dt) if dt > 0 else fps
 
-        # ponytail: overlay only carries raw detection boxes for now, not each
-        # channel's crop rect (modes.py returns finished tiles, not geometry) -
-        # good enough for M4's read-only console; add crop rects if M5's editor needs them.
-        fh, fw = frame.shape[:2]
+        # detect_people() returns numpy float32 coords - json.dumps chokes on those,
+        # so cast to plain Python types explicitly (only surfaces once someone's
+        # actually detected, hence not caught in M4 where test frames had no people)
         boxes = [
-            {"track_id": tid, "x1": x1 / fw, "y1": y1 / fh, "x2": x2 / fw, "y2": y2 / fh}
+            {"track_id": int(tid), "x1": float(x1) / fw, "y1": float(y1) / fh,
+             "x2": float(x2) / fw, "y2": float(y2) / fh}
             for tid, x1, y1, x2, y2 in people
         ]
         state.update(
-            frame=composite(tiles, args.mode, fps),
-            overlay={"boxes": boxes, "channels": len(tiles), "fps": round(fps, 1), "mode": args.mode},
+            frame=_downscale(frame),
+            overlay={
+                "boxes": boxes,
+                "channels": [_normalized_channel(c, fw, fh) for c in channel_list],
+                "fps": round(fps, 1),
+                "frame_w": fw,
+                "frame_h": fh,
+            },
         )
 
     cap.release()
-    for pubs in channel_publishers:
-        for pub in pubs:
-            pub.close()
+    outputs.close_all()
 
 
 def self_test():
     import numpy as np
     from fastapi.testclient import TestClient
 
+    import channels as ch
+
+    # channels.py core logic, independent of the server/HTTP layer
+    frame = np.zeros((2160, 3840, 3), np.uint8)
+    fixed = ch.Channel(1, 100, 100, 640, 360, tracking=False)
+    tile = ch.render_channel(frame, {}, fixed)
+    assert tile.shape == (1080, 1920, 3)
+    assert (fixed.x, fixed.y, fixed.w, fixed.h) == (100, 100, 640, 360)  # unclamped, in bounds
+
+    waiting = ch.Channel(2, 0, 0, 640, 360, tracking=True, target_id=None)
+    assert ch.render_channel(frame, {}, waiting) is not None  # placeholder image, doesn't crash
+    assert ch._status(waiting, {}) == "waiting"
+
+    bbox = (7, 1000, 200, 1600, 1800)  # tid, x1, y1, x2, y2 - tall bbox
+    tracked = ch.Channel(3, 0, 0, 640, 360, tracking=True, target_id=7, zoom="face")
+    ch.render_channel(frame, {7: bbox}, tracked)
+    assert tracked.h < (1800 - 200)  # face preset zooms in tighter than the raw bbox
+    assert ch._status(tracked, {7: bbox}) == "live"
+    assert ch._status(tracked, {}) == "lost"  # target currently undetected
+
     state, cmdq = PipelineState(), CommandQueue()
     state.update(
         frame=np.zeros((1080, 1920, 3), np.uint8),
-        overlay={"boxes": [{"track_id": 1, "x1": 0.1, "y1": 0.1, "x2": 0.5, "y2": 0.5}],
-                 "channels": 4, "fps": 30.0, "mode": 1},
+        overlay={"boxes": [], "channels": [{"id": 1, "x": 0.1, "y": 0.1, "w": 0.3, "h": 0.3,
+                                             "tracking": False, "target_id": None,
+                                             "zoom": "manual", "smoothing": 50, "status": "live"}],
+                 "fps": 30.0},
         source_id=0,
     )
     app = make_app(state, cmdq)
     client = TestClient(app)
 
     r = client.get("/api/state")
-    assert r.status_code == 200 and r.json() == {"mode": 1, "fps": 30.0, "source_id": 0}
+    assert r.status_code == 200 and r.json() == {"fps": 30.0, "source_id": 0}
+
+    r = client.get("/api/channels")
+    assert r.status_code == 200 and r.json()[0]["id"] == 1
+
+    r = client.post("/api/channels", json={"x": 0, "y": 0, "w": 640, "h": 360})
+    assert r.status_code == 200
+    assert cmdq.drain() == [{"type": "add_channel", "x": 0, "y": 0, "w": 640, "h": 360}]
+
+    r = client.patch("/api/channels/1", json={"tracking": True, "target_id": 7})
+    assert r.status_code == 200
+    assert cmdq.drain() == [{"type": "update_channel", "id": 1, "tracking": True, "target_id": 7}]
+
+    r = client.delete("/api/channels/1")
+    assert r.status_code == 200
+    assert cmdq.drain() == [{"type": "delete_channel", "id": 1}]
+
+    r = client.post("/api/preset/multi")
+    assert r.status_code == 200
+    assert cmdq.drain() == [{"type": "preset", "name": "multi"}]
+
+    r = client.post("/api/preset/nonsense")
+    assert r.status_code == 404
 
     r = client.post("/api/input", json={"source_id": 1, "width": 1920, "height": 1080})
     assert r.status_code == 200
@@ -227,7 +357,7 @@ def self_test():
 
     with client.websocket_connect("/ws") as ws:
         data = ws.receive_json()
-        assert data["mode"] == 1 and data["fps"] == 30.0
+        assert data["fps"] == 30.0
 
     print("server self-test OK")
 
@@ -235,7 +365,8 @@ def self_test():
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--src", default="0", help="camera index or video file")
-    ap.add_argument("--mode", type=int, default=1, choices=[1, 2, 3])
+    ap.add_argument("--mode", type=int, default=1, choices=[1, 2, 3],
+                     help="startup preset only (1=multi/2=quad/3=single); change live via /api/preset")
     ap.add_argument("--model", default="yolov8n.pt")
     ap.add_argument("--detect-every", type=int, default=DETECT_EVERY)
     ap.add_argument("--rtsp-out-base", help="e.g. rtsp://localhost:8554/out -> out1..out4")

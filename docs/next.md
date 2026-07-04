@@ -1,9 +1,49 @@
 # next — 지금 할 일
 
-상태: **M4 완료(읽기 전용 콘솔) · M3 오디오 먹싱만 미착수** · 전체 순서는 [ROADMAP.md](ROADMAP.md) 참조
+상태: **M5 완료(편집 UI 연동) · M3 오디오 먹싱만 미착수** · 전체 순서는 [ROADMAP.md](ROADMAP.md) 참조
 
 이 파일은 살아있는 체크리스트다. 마일스톤이 끝나면 완료 표시하고, 다음 마일스톤의 세부
 작업으로 내용을 갈아치운다 (지난 마일스톤 기록은 ROADMAP.md 표에만 남긴다 — 여기서 중복 안 함).
+
+## M5 — 편집 UI 연동 (완료, 2026-07-04)
+
+- [x] `channels.py` 신규: 채널 데이터 모델(`Channel`: x,y,w,h,tracking,target_id,zoom,
+      smoothing) — `modes.py`의 3-모드는 그대로 두고(`reframe.py` CLI가 계속 씀), 서버
+      전용으로 자유 편집 가능한 채널 리스트 도입. 채널마다 독립 `Smoother`+`Presence`.
+      줌 프리셋 배율은 `modes.py`의 `render_single` 실측값(full=1.3/waist=0.7/face=0.35)
+      재사용 — `mockup/index.html`의 눈대중 값(0.32 등) 대신.
+- [x] `server.py` 확장: 고정 `--mode` 분기 대신 `channels: list[Channel]`로 매 프레임
+      렌더 + `CommandQueue`로 CRUD(추가/수정/삭제/프리셋) 처리. 채널별 RTSP/NDI publisher를
+      동적으로 열고 닫음(`ChannelOutputs`). 프리뷰를 `composite()` 2×2 그리드에서 **원본
+      다운스케일 프레임**으로 전환(크롭 드래그는 원본 위에서 해야 함 — UI-PLAN.md §2 원안).
+      오버레이에 `channels`(정규화 rect+상태) + `frame_w`/`frame_h` 추가.
+      신규 엔드포인트: `GET/POST /api/channels`, `PATCH`/`DELETE /api/channels/{id}`,
+      `POST /api/preset/{multi|quad|single}`.
+- [x] `console/index.html` 대폭 확장: `mockup/index.html`의 UI/인터랙션(드래그 이동·
+      리사이즈, 인물 클릭 바인딩, 트래킹 토글, 줌 프리셋, 스무딩 슬라이더, 프리셋 버튼,
+      채널 추가/삭제)을 실제 API/WS에 배선. 좌표는 전부 정규화(0-1)로 다뤄 해상도 전환에도
+      안전(M4의 입력 전환과 조합 가능).
+- [x] 버그 수정: `detect_people()`이 반환하는 `numpy.float32`를 그대로 WS JSON에 실으면
+      `TypeError: Object of type float32 is not JSON serializable` — 사람이 실제로 감지될
+      때만 터지는 문제라 M4 테스트(합성 영상, 사람 없음)에선 못 잡았음. `boxes` 구성 시
+      `int()`/`float()`로 명시 캐스팅해 해결.
+
+### 검증 완료
+
+- [x] `reframe-server --self-test`: `channels.py` 핵심 로직(고정 크롭, 대기 placeholder,
+      줌 프리셋 계산, 상태 전이) + 채널 CRUD 엔드포인트 왕복 통과
+- [x] 실카메라(J0Sunvail Camera)로 실동작 확인: `/api/sources` 썸네일로 카메라 식별 →
+      전환 → 인물 감지 → `PATCH target_id`로 바인딩 → 크롭이 실제로 얼굴/상반신을 따라가는
+      것을 해당 채널의 RTSP 출력에서 프레임 캡처로 확인
+- [x] 채널 삭제 시 해당 RTSP 스트림이 즉시 404로 사라지는 것 확인(ffprobe)
+- [x] 프리셋 전환(MULTI→QUAD→SINGLE) 시 채널 4개가 올바른 좌표/트래킹 상태로 재구성되는
+      것 확인, SINGLE의 full/waist/face 줌 3단계가 시각적으로 뚜렷하게 다름을 프레임
+      캡처로 확인
+- [ ] MULTI/QUAD의 "full" 줌이 데스크 세팅에서 풀프레임으로 클램프되는 현상 재확인(M3와
+      동일한 원인 — 카메라-피사체 거리 부족, 코드 문제 아님. `MIN_CROP_FRACTION` 로직이
+      새 채널 모델에도 동일하게 올바르게 적용되고 있다는 뜻이라 오히려 정상 신호)
+- [ ] `console/index.html`의 드래그/리사이즈 인터랙션 자체는 이번 세션에 브라우저로
+      직접 조작해보지 않음(API/백엔드까지만 자동 검증) — 실제 마우스 조작 확인 필요
 
 ## M4 — 4채널 확장 + 컨트롤 서버 (완료, 2026-07-04)
 

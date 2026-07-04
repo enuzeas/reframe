@@ -23,12 +23,12 @@
 | M2 | 패키징 전환 | ✅ 완료(2026-07-04) — `pyproject.toml`+콘솔 진입점(`reframe` 1개) · `Brewfile`(ffmpeg/mediamtx) · 모델 가중치(`yolov8n.pt`) 해시 고정, `requirements.txt` 통합 | `pip install -e .` 후 `reframe --self-test` 동작 | M1 (안정화된 코드를 패키지화) | INFRA-PLAN.md §10, 상세: [next.md](next.md) |
 | M3 | 송출 PoC (1채널) | 🟡 거의 완료(2026-07-04) — RTSP·NDI 두 경로 모두 실동작 확인(`output.py`에 `RTSPPublisher`+`NDIPublisher`, UDP+B프레임0 튜닝), mDNS 디스커버리~OBS 화면 확인까지 완료. 실사용 중 버그 2건 발견·수정(줌 클램프, One Euro min_cutoff). **줌/패닝 시각 검증도 실 4K 카메라(Elgato Cam Link 4K)로 완료** — SINGLE 모드 얼굴 클로즈업이 자세 변화에도 중심을 유지하며 크롭되는 것 확인. MULTI 모드 풀바디 줌은 이번 데스크 세팅의 짧은 카메라-피사체 거리 때문에 프레임 클램프에 걸림(코드 문제 아님 — 거리 확보되는 환경에서 재검증 필요). 오디오먹싱만 미착수 | RTSP·NDI 경로 동작 확인(완료) · 줌/패닝 육안 확인(완료, MULTI 풀바디는 조건부 재검증 남음) | M2 | UI-PLAN.md §4, 상세: [next.md](next.md) |
 | M4 | 4채널 확장 + 컨트롤 서버 | ✅ 완료(2026-07-04) — `server.py`/`reframe-server`(FastAPI, 단일 프로세스로 시작·분리는 M6), `sources.py`(썸네일 기반 입력 선택), `state.py`, `console/index.html`(읽기 전용). 4채널 RTSP·NDI 독립 송출을 실카메라로 확인(ffprobe·NDI Finder) | 4채널 동시 송출(완료) + 읽기 전용 콘솔에서 실시간 인물박스/프리뷰 확인(백엔드 완료, 브라우저 육안 확인 남음) + UI에서 카메라·해상도 전환 확인(완료) | M3 | UI-PLAN.md §2a, §6 (기존 step 2-3, 6), 상세: [next.md](next.md) |
-| M5 | 편집 UI 연동 | 크롭 편집(이동/리사이즈/삭제/추가/프리셋) API 연동 · 트래킹 바인딩+소실 처리 연동 | [mockup/index.html](../mockup/index.html)에서 검증된 인터랙션이 실제 파이프라인을 그대로 조작 | M4 | UI-PLAN.md §6 (기존 step 4-5) |
+| M5 | 편집 UI 연동 | ✅ 완료(2026-07-04) — `channels.py`(자유 편집 채널 모델, `modes.py`의 고정 3-모드는 `reframe.py` CLI용으로 그대로 유지) · `server.py`에 채널 CRUD+프리셋 API, 프리뷰를 원본 프레임으로 전환 · `console/index.html`에 mockup의 드래그/리사이즈/클릭바인딩/프리셋 인터랙션을 실배선 | [mockup/index.html](../mockup/index.html)에서 검증된 인터랙션이 실제 파이프라인을 그대로 조작 — 실카메라로 바인딩·삭제·프리셋 전환 확인 완료, 브라우저 드래그 육안 확인만 남음 | M4 | UI-PLAN.md §6 (기존 step 4-5), 상세: [next.md](next.md) |
 | M6 | 서비스화 | launchd plist 4종+`install-services.sh` · 채널 배치 상태 영속화(`state.json`) · 로그 로테이션 | 재부팅 후 자동 기동, 마지막 채널 배치 복원 | M5 | INFRA-PLAN.md §5, §11 |
 | M7 (옵션) | 확장 | BoT-SORT+ReID · NDI(분리형 시나리오 B) · 4채널 동시 녹화 | 필요 발생 시에만 착수 | M6 | PLAN.md §3.2 / INFRA-PLAN.md §1(B) / PLAN.md Phase3 |
 
 ## 지금 다음 액션
 
-M0~M4 핵심 검증 끝났다(4K 카메라 확보로 줌/패닝 검증 완료, 4채널 컨트롤 서버 완료). 남은 건
-`console/index.html` 브라우저 육안 확인, 오디오 먹싱(캡처카드 필요), M5(편집 UI 연동) —
-상세는 [next.md](next.md) 참조.
+M0~M5 핵심 검증 끝났다 — 4K 카메라로 줌/패닝 검증, 4채널 컨트롤 서버, 크롭 편집/트래킹
+바인딩 API 연동까지 완료. 남은 건 `console/index.html` 브라우저 드래그 육안 확인, 오디오
+먹싱(캡처카드 필요), M6(서비스화) — 상세는 [next.md](next.md) 참조.
