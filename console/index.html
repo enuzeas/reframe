@@ -304,6 +304,16 @@ window.addEventListener("keydown", (e) => {
 
 // ---- API calls ----
 async function patchChannel(id, body) {
+  // Apply locally first: the WS overlay ticks at 10Hz regardless of this request's
+  // round trip, and the server only applies the command on its next render frame -
+  // so a broadcast reflecting the still-old state can arrive and overwrite the click
+  // back to its previous value before the real update ever shows up. Toggling
+  // tracking or changing the zoom preset looked like it "didn't work" (or worse,
+  // flip-flopped) for exactly this reason. Same fix as the existing drag-override
+  // pattern (`dragging.current`), just for click/select actions instead of drags.
+  const c = channelsState.find(ch => ch.id === id);
+  if (c) Object.assign(c, body);
+  renderPanel();
   await fetch(`/api/channels/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 }
 async function deleteChannel(id) {
