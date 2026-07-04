@@ -82,6 +82,15 @@ def make_app(state: PipelineState, cmdq: CommandQueue) -> FastAPI:
 
     @app.get("/api/sources/{index}/resolutions")
     def get_resolutions(index: int):
+        """probe_resolutions() opens its own cv2.VideoCapture(index) - which fails
+        (device already held open) for whichever camera the pipeline is currently
+        running, always returning []. That silently hid the active camera's own
+        resolution (4K included) from its own dropdown. Report what it's actually
+        running at instead of re-probing in that one case."""
+        _, overlay, source_id = state.snapshot()
+        if index == source_id:
+            fw, fh = overlay.get("frame_w"), overlay.get("frame_h")
+            return [{"width": fw, "height": fh}] if fw and fh else []
         return [{"width": w, "height": h} for w, h in sources.probe_resolutions(index)]
 
     @app.post("/api/input")
