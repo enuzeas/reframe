@@ -133,6 +133,34 @@ curl -X POST localhost:8000/api/preset/single
 실 플레이어에서 재생이 깨져 **보류**다 — 위 OBS 별도 트랙 방식으로 대체됐으므로 평소엔
 `--audio-src` 없이(비디오 전용) 쓴다. 먹싱이 왜 깨졌는지 상세는 next.md "오디오 먹싱" 섹션.
 
+## 1e. 서비스로 상시 구동 (M6)
+
+수동으로 `reframe-server`를 띄우는 대신 launchd 서비스로 등록하면 로그인 시 자동 기동 +
+크래시 시 자동 재기동된다. 단일 프로세스 설계라 서비스는 **2개**뿐(mediamtx + reframe-server).
+
+```bash
+# 사전: brew bundle (ffmpeg/mediamtx) + pip install -e . (venv에 reframe-server 진입점)
+REFRAME_SRC=4 scripts/install-services.sh      # 배포값은 env로 (기본 --src 0)
+```
+
+- plist는 커밋 안 하고 **스크립트가 이 머신의 절대경로를 해석해 생성**한다(`~/Library/
+  LaunchAgents/com.reframe.{mediamtx,server}.plist`). venv/ffmpeg/레포 경로가 머신마다 다르기 때문.
+- 로그: `~/Library/Logs/reframe/com.reframe.*.{out,err}.log`
+- 채널 배치(좌표/트래킹/줌/스무딩)는 편집할 때마다 `~/Library/Application Support/reframe/
+  state.json`에 저장돼 **재시작 후 복원**된다. 초기화하려면 그 파일을 지운다(다음 기동 때
+  `--src`의 `--mode` 프리셋으로 새로 시작). 단, `target_id`(추적 대상)와 입력 소스는 복원 안 함.
+- 상태 확인 / 중지:
+
+```bash
+launchctl print gui/$(id -u)/com.reframe.server | grep -i state
+scripts/uninstall-services.sh                  # 서비스 해제(state.json은 남김)
+```
+
+> **함정**: 코드에 새 모듈 파일을 추가한 뒤엔 `pip install -e .`를 다시 돌려야 한다 — editable
+> 설치가 py-modules 목록을 구워두기 때문에, 안 하면 서비스가 `ModuleNotFoundError`로 크래시
+> 루프에 빠진다. 또 launchd 기본 PATH엔 Homebrew가 없어서, install 스크립트가 서버 plist의
+> PATH에 ffmpeg dir을 넣어준다(안 그러면 RTSP 인코딩이 조용히 실패).
+
 ## 2. UI 목업 열어보기
 
 ```bash

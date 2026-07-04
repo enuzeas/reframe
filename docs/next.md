@@ -1,10 +1,43 @@
 # next — 지금 할 일
 
-상태: **M5 완료 + 실사용 안정화·성능 튜닝 완료 · 오디오는 OBS 별도 트랙으로 운영(reframe
-먹싱은 보류)** · 전체 순서는 [ROADMAP.md](ROADMAP.md) 참조
+상태: **M6(서비스화) 완료 · 오디오는 OBS 별도 트랙으로 운영(reframe 먹싱은 보류)** ·
+전체 순서는 [ROADMAP.md](ROADMAP.md) 참조
 
 이 파일은 살아있는 체크리스트다. 마일스톤이 끝나면 완료 표시하고, 다음 마일스톤의 세부
 작업으로 내용을 갈아치운다 (지난 마일스톤 기록은 ROADMAP.md 표에만 남긴다 — 여기서 중복 안 함).
+
+## M6 서비스화 (완료, 2026-07-04)
+
+단일 프로세스 설계라 계획서(INFRA-PLAN §5)의 4-프로세스 분리(pipeline/encode×N/api)는 유예
+그대로 두고, 서비스는 **2종**만 등록한다: `mediamtx` + `reframe-server`(파이프라인+API+채널별
+ffmpeg 인코더를 한 프로세스가 소유).
+
+- [x] `scripts/install-services.sh` / `uninstall-services.sh` — launchd user agent 등록/해제.
+      plist는 **커밋 안 하고 스크립트가 생성**한다(venv/mediamtx/ffmpeg/레포 경로가 머신마다
+      달라서 — 카메라를 인덱스 아닌 썸네일로 고르는 것과 같은 이유). 배포값(`--src` 등)은 env로
+      오버라이드(`REFRAME_SRC`, `REFRAME_RTSP_BASE`, `REFRAME_NDI_BASE`, `REFRAME_HOST/PORT`)
+- [x] **launchd PATH 함정**: launchd는 `/usr/bin:/bin:...`만 주고 Homebrew(`/opt/homebrew/bin`)를
+      뺀다. reframe-server는 `ffmpeg`를 이름으로 spawn(output.py)하므로, 그 dir을 서버 plist의
+      `EnvironmentVariables > PATH`에 넣어줘야 RTSP 인코딩이 됨. 안 넣으면 채널이 조용히 인코딩
+      실패. 실측 확인: 서비스 PATH에서 `rtsp://.../out1`이 h264 1080p로 송출됨
+- [x] 기동 순서(mediamtx 먼저)는 **강제 안 함** — `ChannelOutputs`의 퍼블리셔 재시도 로직이
+      mediamtx가 늦게 떠도 다음 `sync()`에서 다시 붙음(INFRA-PLAN §5가 예상한 "의존 대상
+      헬스체크 재시도"가 이미 구현돼 있어 순차 래퍼 불필요). `KeepAlive`+`ThrottleInterval 5`
+- [x] `persistence.py` — 채널 배치를 `~/Library/Application Support/reframe/state.json`에
+      **원자적(temp+os.replace)·디바운스 2초** 저장, 시작 시 복원(INFRA-PLAN §8). `target_id`와
+      입력 소스는 **복원 안 함**(트랙 ID는 세션마다 새로 부여돼 항상 stale, 카메라 인덱스는
+      세션 간 바뀜) — 트래킹 채널은 재바인딩 대기 상태로 복원. 파손된 state.json은 조용히
+      무시하고 프리셋으로 폴백
+- [x] **실동작 검증**: `install-services.sh` 실행 → 두 서비스 launchd로 기동 → ch1 zoom=face로
+      편집 → state.json 기록 확인 → `launchctl kickstart -k`로 하드 재시작 → ch1이 face로 복원됨
+- [x] **주의**: 새 모듈(persistence.py)을 추가하면 editable 설치 목록이 갱신 안 돼
+      `ModuleNotFoundError` — `pip install -e .` 재실행 필요(py-modules에 등록도 함께). 겪음·해결
+
+### 남은 것 (M7 옵션, 필요 발생 시)
+
+- [ ] 로그 로테이션 — 지금은 launchd가 `~/Library/Logs/reframe/*.log`에 append만. 무한 증가가
+      실제 문제되면 크기 기준 로테이션 추가(INFRA-PLAN §8)
+- [ ] 4-프로세스 분리(INFRA-PLAN §5 원안) — 단일 프로세스로 부하/신뢰성 문제가 실제 생기면
 
 ## M5 실사용 안정화 + 30fps 튜닝 (완료, 2026-07-04)
 
@@ -283,7 +316,7 @@ M4의 `sources.py` 썸네일 기반 선택 설계로 이어짐.
 
 ## 완료되면 (지금 여기)
 
-M3·M4·M5 핵심 검증은 끝났다. 남은 건:
+M3·M4·M5·M6 핵심 검증은 끝났다(서비스화·영속화까지 실동작 확인). 남은 건:
 
 1. MULTI 모드 풀바디 줌 재검증 — 카메라-피사체 거리 확보되는 환경에서
-2. M6 — 서비스화(launchd, 채널 배치 영속화)
+2. M7(옵션) — BoT-SORT+ReID, 4채널 동시 녹화, 로그 로테이션 등 필요 발생 시에만

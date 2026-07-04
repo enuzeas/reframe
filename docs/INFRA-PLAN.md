@@ -103,6 +103,13 @@
 
 ## 5. 프로세스 관리 및 자동 복구
 
+> **M6 구현(2026-07-04)**: 아래 4-프로세스 분리(pipeline/encode×N/api)는 M4에서 유예했고
+> 여전히 안 만들었다 — reframe-server 한 프로세스가 파이프라인+API+채널별 ffmpeg 인코더를
+> 다 소유하는 단일 프로세스 설계라, 실제 등록하는 서비스는 **2개**(mediamtx + reframe-server)
+> 뿐이다. `scripts/install-services.sh`가 plist 2개를 머신별 절대경로로 생성한다(§10·§11).
+> 기동 순서 재시도 로직은 `ChannelOutputs`(output.py)의 퍼블리셔 재생성으로 이미 구현돼
+> 있어 순차 래퍼가 필요 없었다. 이하 4-프로세스 서술은 분리가 실제로 필요해질 때의 목표 상태.
+
 - 전부 `launchd` user agent로 등록 (`~/Library/LaunchAgents/com.reframe.*.plist`),
   `KeepAlive: true`로 크래시 시 자동 재기동. 재기동 폭주 방지를 위해 `ThrottleInterval` 설정.
 - 기동 순서 의존성: `mediamtx` → `reframe-pipeline` → `reframe-encode-*` → `reframe-api`.
@@ -140,7 +147,9 @@
 ## 8. 저장소 / 설정 영속성
 
 - 채널 배치(좌표/트래킹 상태/줌 프리셋)는 `~/Library/Application Support/reframe/state.json`에
-  주기 저장(변경 시 debounce 2초) — 재시작 후 마지막 구성 복원.
+  주기 저장(변경 시 debounce 2초) — 재시작 후 마지막 구성 복원. **구현됨(M6, `persistence.py`)**:
+  원자적 쓰기(temp+`os.replace`)로 KeepAlive 서비스가 쓰기 도중 죽어도 파손 안 됨. `target_id`
+  (트랙 ID는 세션 스코프)와 입력 소스(카메라 인덱스 불안정)는 복원 대상에서 제외.
 - 녹화본(Phase 3 옵션)은 별도 볼륨에 채널별 파일로 저장, 이름 규칙 `out{n}_YYYYMMDD_HHMMSS.mp4`.
 - 로그는 launchd 표준 stdout/stderr 리다이렉트로 `~/Library/Logs/reframe/*.log`, 크기 기준
   로테이션(예: 100MB) — 무한 증가 방지.
@@ -172,7 +181,7 @@
 | --- | --- | --- |
 | Python 코드 | `pyproject.toml`(setuptools, `py-modules`)으로 패키지화, 콘솔 진입점 `reframe` 1개 등록 | `pip install -e .`로 설치. `reframe-pipeline`/`reframe-api` 분리는 그 프로세스들이 실제로 생기는 M3/M4 이후에 나눔(코드는 여전히 형제 모듈 파일들, `src/` 레이아웃도 그때 재검토) |
 | 외부 도구(ffmpeg, mediamtx) | 저장소 루트 `Brewfile` + `brew bundle` | §11 체크리스트의 수동 나열을 명령어 한 줄로 대체, 버전 고정. 아직 어떤 코드도 안 씀(M3에서 사용 시작) |
-| 서비스 등록 | `deploy/launchd/*.plist` 템플릿 + `scripts/install-services.sh` | §5의 launchd 구조를 스크립트로 자동화 — M6에서 실제 서비스(pipeline/encode/api)가 생긴 뒤 작성 |
+| 서비스 등록 | `scripts/install-services.sh` / `uninstall-services.sh` | **구현됨(M6)**: plist를 커밋하는 대신 스크립트가 머신별 절대경로(venv/mediamtx/ffmpeg)를 해석해 launchd plist 2개를 생성·로드. 단일 프로세스라 pipeline/encode/api 분리 없이 mediamtx+reframe-server 2종 |
 | 설정값 | `~/Library/Application Support/reframe/config.yaml` (레포에 기본값, 로컬에 오버라이드) | 채널 배치·캡처 장치 인덱스 등 머신별 값 분리(§8) — 채널/UI 백엔드가 생기는 M4~M5 이후에 의미가 있어 아직 안 만듦 |
 | 모델 가중치 | `yolo26n.pt` sha256 `9b09cc8b...a8ad4fef` (2026-07-04 다운로드분) | PLAN.md §3.1은 원래 YOLO11n을 가정했지만 프로토타입 기본값은 `yolov8n.pt`로 방치돼 있었음(문서/코드 불일치 — 최초 커밋부터 있던 문제). YOLO11n을 거치지 않고 바로 YOLO26n으로 전환(NMS-free, mAP·CPU 속도 둘 다 YOLO11n보다 우위 — [비교표](https://docs.ultralytics.com/compare/yolo26-vs-yolo11)). 파일 자체는 `.gitignore`(`*.pt`)로 커밋 제외, Ultralytics가 첫 실행 시 자동 다운로드 |
 
@@ -187,7 +196,7 @@ Homebrew tap(`brew install reframe`) 또는 서명된 `.app`으로 승격한다 
 [ ] brew bundle  (Brewfile: ffmpeg, mediamtx, §10)
 [ ] obs-syphon 플러그인 설치 (시나리오 A)  /  obs-ndi(DistroAV) 설치 (시나리오 B)
 [ ] UVC 캡처카드 연결 확인: `system_profiler SPUSBDataType | grep -A5 Capture`
-[ ] scripts/install-services.sh 실행 (launchd plist 4종 등록 및 로드)
+[ ] scripts/install-services.sh 실행 (launchd plist 2종 생성·로드 — 단일 프로세스라 4종 아님, §5)
 [ ] 컨트롤 콘솔(http://localhost:8000) 접속 확인
 [ ] OBS에서 채널 4개 소스 연결 확인 (시나리오별 프로토콜)
 [ ] fps/지연 지표가 §6 임계치 이내인지 실측
