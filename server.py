@@ -184,10 +184,17 @@ class ChannelOutputs:
         self.by_id = {}
 
     def sync(self, channel_ids):
+        """Closing a publisher waits on its ffmpeg subprocess to exit (up to ~10s
+        with the terminate()/kill() fallback) - doing that inline here blocks this
+        method's caller, the single-threaded render loop, so *every* surviving
+        channel's frames stall for that whole time whenever one channel is deleted.
+        Confirmed live: deleting 3 channels produced multi-second gaps (up to 10.5s)
+        in the render loop, which looked exactly like the frozen-video reports this
+        was supposed to help diagnose. Close in the background instead."""
         for cid in list(self.by_id):
             if cid not in channel_ids:
-                for pub in self.by_id.pop(cid):
-                    pub.close()
+                pubs = self.by_id.pop(cid)
+                threading.Thread(target=lambda ps=pubs: [p.close() for p in ps], daemon=True).start()
         for cid in channel_ids:
             if cid not in self.by_id:
                 pubs = []
