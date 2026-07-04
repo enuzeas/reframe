@@ -64,6 +64,10 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 select, input[type=range] { width: 100%; }
 select { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 6px; font-size: 12px; }
 input[type=range] { accent-color: var(--ch-color, var(--accent)); }
+.zoom-picker { display: flex; gap: 4px; }
+.zoom-opt { flex: 1; min-width: 0; padding: 6px 2px; font-size: 11px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text-dim); cursor: pointer; }
+.zoom-opt.active { background: var(--ch-color, var(--accent)); color: #0b0d12; border-color: var(--ch-color, var(--accent)); font-weight: 700; }
+.zoom-opt:disabled { opacity: .4; cursor: not-allowed; }
 .url-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
 .url-row code { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-dim); }
 .add-frame-card { border: 1px dashed var(--border); border-radius: var(--radius); display: flex; align-items: center; justify-content: center; color: var(--text-dim); padding: 16px; cursor: pointer; font-size: 13px; gap: 6px; }
@@ -444,12 +448,11 @@ function renderPanel() {
       </div>
       <div class="field">
         <label><span>줌 프리셋</span></label>
-        <select data-action="zoom" ${!c.tracking ? "disabled" : ""}>
-          <option value="manual" ${c.zoom === "manual" ? "selected" : ""}>수동 크기</option>
-          <option value="full" ${c.zoom === "full" ? "selected" : ""}>풀샷</option>
-          <option value="waist" ${c.zoom === "waist" ? "selected" : ""}>웨이스트업</option>
-          <option value="face" ${c.zoom === "face" ? "selected" : ""}>페이스 클로즈업</option>
-        </select>
+        <div class="zoom-picker">
+          ${[["manual", "수동"], ["full", "풀샷"], ["waist", "웨이스트업"], ["face", "페이스"]].map(([v, label]) => `
+            <button type="button" class="zoom-opt ${c.zoom === v ? "active" : ""}" data-action="zoom" data-zoom="${v}" ${!c.tracking ? "disabled" : ""}>${label}</button>
+          `).join("")}
+        </div>
       </div>
       <div class="field">
         <label><span>스무딩 (One Euro)</span><span>${c.smoothing}</span></label>
@@ -468,7 +471,18 @@ function renderPanel() {
       // the user had just manually set. "Manual" is what actually keeps it.
       patchChannel(c.id, c.tracking ? { tracking: false, target_id: null } : { tracking: true, zoom: "manual" });
     });
-    card.querySelector('[data-action=zoom]').addEventListener("change", (ev) => patchChannel(c.id, { zoom: ev.target.value }));
+    // Segmented buttons instead of a native <select>: a select's dropdown can stay
+    // open for however long the user takes to decide, and if a WS-triggered rebuild
+    // happened while it was open, the element backing it got destroyed mid-interaction
+    // - the browser-rendered dropdown chrome kept showing (detached from anything
+    // live) with clicks on it doing nothing. Plain buttons use the same click handling
+    // already proven reliable for the tracking toggle (panelInteracting suppression).
+    card.querySelectorAll('[data-action=zoom]').forEach(btn => {
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        patchChannel(c.id, { zoom: btn.dataset.zoom });
+      });
+    });
     card.querySelector('[data-action=smoothing]').addEventListener("input", (ev) => patchChannel(c.id, { smoothing: +ev.target.value }));
 
     list.appendChild(card);
