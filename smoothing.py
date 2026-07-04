@@ -6,16 +6,19 @@ ONEEURO_MIN_CUTOFF = 3.0  # ponytail: bumped from 1.0 (2026-07-04 live test) - a
                           # filter treated ordinary head movement as noise to suppress,
                           # only reacting to fast/large moves (subject leaving frame).
                           # lower = smoother but laggier; raise further if still sluggish.
-ONEEURO_BETA = 0.15       # ponytail: dropped from 0.7 (2026-07-04) - beta scales cutoff by
-                          # *velocity*, so at 0.7 almost any real detection noise (a person
-                          # naturally swaying, YOLO bbox jitter frame-to-frame) reads as
-                          # "fast movement" and lets jitter straight through, independent of
-                          # min_cutoff - confirmed with a synthetic noisy-signal test: cutting
-                          # min_cutoff in half barely changed frame-to-frame jitter, but
-                          # dropping beta 0.7->0.1 nearly halved it, for only a small lag
-                          # increase. This is also why the UI's smoothing slider (which only
-                          # adjusts min_cutoff) had barely any visible effect on shakiness.
-                          # higher = less lag on fast moves, more jitter on ordinary ones.
+ONEEURO_BETA = 0.02       # ponytail: dropped 0.7->0.15->0.02 (2026-07-04) - beta scales
+                          # cutoff by *velocity*, so any nonzero value lets ordinary
+                          # detection noise (a person naturally swaying, YOLO bbox jitter
+                          # frame-to-frame) read as "fast movement" and pass through,
+                          # independent of min_cutoff. 0.15 wasn't low enough per live
+                          # feedback; synthetic-signal test of the full range showed beta
+                          # is what actually controls jitter here (min_cutoff barely moves
+                          # it), with jitter dropping monotonically all the way to beta=0
+                          # (0.74 vs 4.13 at the original 0.7) for a still-modest lag
+                          # increase (~3.5 vs ~0.8, a few frames at typical fps). Left just
+                          # above 0 rather than exactly 0 to keep a sliver of fast-motion
+                          # responsiveness (leaving frame, sudden large moves) rather than
+                          # a pure constant-cutoff low-pass filter.
 ONEEURO_D_CUTOFF = 1.0    # derivative cutoff, rarely needs tuning
 
 
