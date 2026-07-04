@@ -458,13 +458,13 @@ function renderPanel() {
         <label><span>줌 프리셋</span></label>
         <div class="zoom-picker">
           ${[["manual", "수동"], ["full", "풀샷"], ["waist", "웨이스트업"], ["face", "페이스"]].map(([v, label]) => `
-            <button type="button" class="zoom-opt ${c.zoom === v ? "active" : ""}" data-action="zoom" data-zoom="${v}" ${!c.tracking ? "disabled" : ""}>${label}</button>
+            <button type="button" class="zoom-opt ${c.zoom === v ? "active" : ""}" data-action="zoom" data-zoom="${v}">${label}</button>
           `).join("")}
         </div>
       </div>
       <div class="field">
         <label><span>스무딩 (One Euro)</span><span>${c.smoothing}</span></label>
-        <input type="range" min="0" max="100" value="${c.smoothing}" data-action="smoothing">
+        <input type="range" min="0" max="100" value="${c.smoothing}" data-action="smoothing" ${!c.tracking ? "disabled" : ""}>
       </div>
       <div class="url-row"><code>${channelUrl(c)}</code></div>
     `;
@@ -472,12 +472,10 @@ function renderPanel() {
     card.querySelector('[data-action=delete]').addEventListener("click", (ev) => { ev.stopPropagation(); deleteChannel(c.id); });
     card.querySelector('[data-action=toggle-track]').addEventListener("click", (ev) => {
       ev.stopPropagation();
-      // zoom: "manual" on turning tracking on - otherwise whatever zoom preset was
-      // last set (often still "full" from a previous preset/session) takes over the
-      // instant a target resolves, and the crop height becomes the tracked person's
-      // bbox height times that preset's multiplier - completely ignoring the size
-      // the user had just manually set. "Manual" is what actually keeps it.
-      patchChannel(c.id, c.tracking ? { tracking: false, target_id: null } : { tracking: true, zoom: "manual" });
+      // No forced zoom here anymore - the zoom picker is enabled even while tracking
+      // is off precisely so a preset can be chosen deliberately beforehand and then
+      // respected once tracking turns on, instead of always being reset to "manual".
+      patchChannel(c.id, c.tracking ? { tracking: false, target_id: null } : { tracking: true });
     });
     // Segmented buttons instead of a native <select>: a select's dropdown can stay
     // open for however long the user takes to decide, and if a WS-triggered rebuild
