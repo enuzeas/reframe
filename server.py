@@ -263,6 +263,11 @@ def pipeline_loop(args, state: PipelineState, cmdq: CommandQueue, stop_event: th
 
     def open_capture(src, width=None, height=None):
         cap = cv2.VideoCapture(src)
+        # Default internal buffer holds a few frames - fine for playback, but for a live
+        # pipeline it just adds latency (each read() can return an already-stale buffered
+        # frame instead of the newest one). Not all backends honor this, but AVFoundation
+        # does.
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         if width and height:
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
