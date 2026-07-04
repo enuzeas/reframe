@@ -88,7 +88,17 @@ def render_channel(frame, people_by_id, channel):
         # to 50% of frame height defeated the entire point of setting a small size
         # before turning tracking on (confirmed: a 360px-tall manual box grew past
         # 1000px the moment tracking resolved a target).
-        target_h = max(ZOOM_MULT[channel.zoom] * (y2 - y1), fh * MIN_CROP_FRACTION)
+        #
+        # The floor itself is scaled by each preset's own multiplier relative to
+        # "full" rather than one flat MIN_CROP_FRACTION for all three - confirmed live
+        # that a single shared floor made "waist" and "face" collapse to the exact
+        # same crop size (both 0.5x0.5 normalized) for a person at ordinary webcam
+        # distance, since both 0.7x and 0.35x of their bbox height landed under the
+        # same 50%-of-frame floor. Scaling preserves full > waist > face ordering
+        # instead of flattening it, while still preventing each from shrinking to
+        # near-zero for a very distant/small person.
+        floor = MIN_CROP_FRACTION * (ZOOM_MULT[channel.zoom] / ZOOM_MULT["full"])
+        target_h = max(ZOOM_MULT[channel.zoom] * (y2 - y1), fh * floor)
         ch_h = channel.smoother.scalar(f"{key}:h", target_h * widen)
     else:
         # "manual" has no bbox to re-derive target_h from each frame - it reads back
