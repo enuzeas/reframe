@@ -22,4 +22,4 @@ reframe = "reframe:main"
 reframe-server = "server:main"
 
 [tool.setuptools]
-py-modules = ["reframe", "smoothing", "geometry", "detection", "tracking", "modes", "display", "output", "sources", "state", "server", "channels"]
+py-modules = ["reframe", "smoothing", "geometry", "detection", "tracking", "modes", "display", "output", "sources", "state", "server", "channels", "persistence"]

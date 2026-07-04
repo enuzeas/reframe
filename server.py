@@ -33,6 +33,7 @@ import sources
 from channels import PRESETS, Channel, next_channel_id, render_channels
 from detection import detect_people
 from output import NDIPublisher, RTSPPublisher, rtsp_cmd
+from persistence import load_channels, save_channels
 from state import CommandQueue, PipelineState
 
 CONSOLE_DIR = Path(__file__).parent / "console"
@@ -41,6 +42,7 @@ MJPEG_FPS = 12
 OVERLAY_HZ = 10
 PREVIEW_MAX_WIDTH = 1280
 MODE_TO_PRESET = {1: "multi", 2: "quad", 3: "single"}
+SAVE_DEBOUNCE_S = 2.0  # persist channel layout at most this often (INFRA-PLAN §8)
 
 
 def mjpeg_chunk(state: PipelineState):
@@ -266,6 +268,18 @@ def _apply_command(cmd, channel_list, people, fw, fh):
         channel_list[:] = PRESETS[cmd["name"]](people, fw, fh)
 
 
+def _channels_from_saved(saved):
+    """Rebuild Channel objects from persisted dicts, or None if any are unusable (caller
+    falls back to the startup preset). target_id is intentionally not restored - track IDs
+    are session-scoped, so a tracking channel comes back waiting for a fresh bind."""
+    try:
+        return [Channel(d["id"], d["x"], d["y"], d["w"], d["h"],
+                        tracking=d.get("tracking", False), zoom=d.get("zoom", "manual"),
+                        smoothing=d.get("smoothing", 50)) for d in saved]
+    except (KeyError, TypeError):
+        return None
+
+
 def pipeline_loop(args, state: PipelineState, cmdq: CommandQueue, stop_event: threading.Event):
     import torch
     from ultralytics import YOLO
@@ -323,9 +337,10 @@ def pipeline_loop(args, state: PipelineState, cmdq: CommandQueue, stop_event: th
     out_fps = cap.get(cv2.CAP_PROP_FPS) or 30
     outputs = ChannelOutputs(args.rtsp_out_base, args.ndi_out_base, out_fps, audio_src=args.audio_src)
 
-    channel_list = None  # built from the startup preset once we know the frame size
+    channel_list = None  # restored from state.json, or the startup preset (below)
     fps, t0 = 0.0, time.time()
     people, frame_idx = [], 0
+    layout_dirty, last_save = False, 0.0
 
     while not stop_event.is_set():
         ok, frame = cap.read()
@@ -335,7 +350,12 @@ def pipeline_loop(args, state: PipelineState, cmdq: CommandQueue, stop_event: th
         fh, fw = frame.shape[:2]
 
         if channel_list is None:
-            channel_list = PRESETS[MODE_TO_PRESET[args.mode]]([], fw, fh)
+            # Restore the last saved layout if there is one (a service that auto-restarts
+            # would otherwise lose the operator's channel setup on every reboot/crash);
+            # --mode's preset is only the first-run default.
+            saved = load_channels()
+            channel_list = (_channels_from_saved(saved) if saved else None) \
+                or PRESETS[MODE_TO_PRESET[args.mode]]([], fw, fh)
 
         for cmd in cmdq.drain():
             if cmd["type"] == "switch_input":
@@ -344,6 +364,7 @@ def pipeline_loop(args, state: PipelineState, cmdq: CommandQueue, stop_event: th
                 state.update(source_id=cmd["source_id"])
             else:
                 _apply_command(cmd, channel_list, people, fw, fh)
+                layout_dirty = True  # source isn't persisted, only channel edits are
 
         if frame_idx % args.detect_every == 0:
             people = detect_people(model, frame, device=device)
@@ -377,6 +398,15 @@ def pipeline_loop(args, state: PipelineState, cmdq: CommandQueue, stop_event: th
             },
         )
 
+        # ponytail: a debounced, atomic ~sub-ms JSON write every couple seconds - no
+        # separate thread/timer needed. Runs in the render loop only when something
+        # actually changed.
+        if layout_dirty and time.time() - last_save >= SAVE_DEBOUNCE_S:
+            save_channels(channel_list)
+            layout_dirty, last_save = False, time.time()
+
+    if channel_list is not None and layout_dirty:
+        save_channels(channel_list)  # flush edits made inside the last debounce window
     cap.release()
     outputs.close_all()
     write_pool.shutdown(wait=False)
@@ -416,6 +446,12 @@ def self_test():
     face_ch = ch.Channel(5, 0, 0, 640, 360, tracking=True, target_id=7, zoom="face")
     ch.render_channel(frame, {7: bbox}, face_ch)
     assert waist_ch.h > face_ch.h
+
+    # restore round-trip: saved layout rebuilds with geometry/zoom kept but target_id
+    # dropped (stale track id), and a malformed record falls back to preset (None)
+    restored = _channels_from_saved([tracked.to_dict()])
+    assert restored[0].zoom == "face" and restored[0].target_id is None
+    assert _channels_from_saved([{"id": 1}]) is None  # missing geometry -> preset fallback
 
     state, cmdq = PipelineState(), CommandQueue()
     state.update(
