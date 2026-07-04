@@ -27,6 +27,21 @@
    억제하고, 빠르고 큰 움직임(프레임 이탈)에서만 반응했음. 3.0으로 올려 실측(`smoothed_cx`가
    `raw_cx`를 거의 그대로 추종)으로 확인 완료.
 
+### NDI 경로 PoC (완료, 2026-07-04)
+
+- [x] Syphon 대신 NDI로 방향 전환 — 이 머신엔 Syphon 플러그인이 없고 ffmpeg도 Syphon 출력을
+      지원 안 함. 반대로 obs-ndi 플러그인과 NDI SDK(`libndi.dylib`, NDI Tools 설치분)는
+      이미 있어서 마찰이 훨씬 적었음.
+- [x] `output.py`에 `NDIPublisher` 추가 (`cyndilib` 사용, BGRX fourcc, `Fraction`으로 프레임레이트
+      지정 필요 — 그냥 float 넘기면 `AttributeError`). `reframe.py --ndi-out <name>` 옵션 추가,
+      RTSP와 동시 송출도 가능하도록 `publishers` 리스트로 일반화.
+- [x] 실동작 확인: 합성 4K 루프 영상 → 파이프라인 → `NDIPublisher` → 별도 프로세스의
+      `cyndilib.finder.Finder`가 mDNS로 `reframe-live-test` 소스를 실제로 발견 (네트워크
+      레벨 왕복 확인 완료). OBS `obs-ndi`에서 소스 선택해 화면으로 보는 것까지는 GUI라
+      사용자 육안 확인 필요.
+- [x] `pyproject.toml`에 `cyndilib` 추가, `Brewfile`에 NDI SDK가 brew로 설치 안 되는 이유와
+      설치처(NDI Tools) 메모.
+
 ### 보류 — 하드웨어 없이는 검증 불가
 
 - [ ] **줌/패닝 시각 검증** — 노트북 웹캠(FaceTime HD Camera)의 좁은 세로 화각 때문에 불가능.
@@ -34,7 +49,6 @@
       크롭 여백이 구조적으로 없음(코드 문제 아님, 위 두 버그 수정 후에도 동일). 위 표에서 확인한
       대로 감지·추적·스무딩·클램프 로직은 전부 정상 — **실제 4K 와이드 카메라가 생기면 이 항목만
       재검증**하면 되고, 다른 수정이 더 필요할 가능성은 낮음.
-- [ ] Syphon 경로 PoC — obs-syphon 플러그인 설치 여부 미확인
 - [ ] 오디오 먹싱 A/V 동기 검증 — 캡처카드 오디오 입력 필요
 - [ ] (필요시만) WebRTC/WHEP 경로 확인
 
@@ -42,6 +56,6 @@
 
 4K 카메라 없이 먼저 할 수 있는 것부터 (줌/패닝 검증과 독립적):
 
-1. Syphon 경로 PoC — obs-syphon 플러그인 설치 확인부터
+1. OBS에서 `reframe-live-test` NDI 소스를 실제로 열어 화면 확인 (사용자 육안 검증만 남음)
 2. 오디오 먹싱 — 캡처카드나 마이크 입력으로 A/V 동기 검증
 3. 4K 카메라 확보되면 줌/패닝 육안 검증으로 M3 마무리

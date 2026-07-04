@@ -11,6 +11,7 @@ dependencies = [
     "ultralytics>=8.2",
     "opencv-python>=4.9",
     "lap>=0.5.12",
+    "cyndilib>=0.0.9",  # NDI output (--ndi-out); needs NDI SDK runtime installed separately, see Brewfile
 ]
 
 [project.scripts]

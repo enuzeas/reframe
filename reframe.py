@@ -26,7 +26,7 @@ from detection import detect_people
 from display import composite
 from geometry import HD_H, HD_W, clamp_window, crop_hd
 from modes import render_multi, render_quad, render_single
-from output import RTSPPublisher
+from output import NDIPublisher, RTSPPublisher
 from smoothing import Smoother
 from tracking import Presence, SlotManager
 
@@ -43,6 +43,7 @@ def main():
     ap.add_argument("--detect-every", type=int, default=DETECT_EVERY,
                      help="run YOLO every Nth frame, reusing the last boxes in between")
     ap.add_argument("--rtsp-out", help="rtsp:// URL to publish tile 0 to (e.g. rtsp://localhost:8554/out1)")
+    ap.add_argument("--ndi-out", help="NDI source name to publish tile 0 as (e.g. reframe-out1)")
     ap.add_argument("--no-preview", action="store_true", help="skip the cv2 debug window")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
@@ -68,7 +69,12 @@ def main():
     smoother, slots, presence = Smoother(), SlotManager(), Presence()
     fps, t0 = 0.0, time.time()
     people, frame_idx = [], 0
-    publisher = RTSPPublisher(args.rtsp_out, fps=cap.get(cv2.CAP_PROP_FPS) or 30) if args.rtsp_out else None
+    out_fps = cap.get(cv2.CAP_PROP_FPS) or 30
+    publishers = []
+    if args.rtsp_out:
+        publishers.append(RTSPPublisher(args.rtsp_out, fps=out_fps))
+    if args.ndi_out:
+        publishers.append(NDIPublisher(args.ndi_out, fps=out_fps))
 
     while True:
         ok, frame = cap.read()
@@ -85,8 +91,8 @@ def main():
         else:
             tiles = render_single(frame, people, smoother, presence)
 
-        if publisher:
-            publisher.write(tiles[0])
+        for pub in publishers:
+            pub.write(tiles[0])
         if not args.no_preview:
             cv2.imshow("reframe", composite(tiles, mode, fps))
 
@@ -101,8 +107,8 @@ def main():
 
     cap.release()
     cv2.destroyAllWindows()
-    if publisher:
-        publisher.close()
+    for pub in publishers:
+        pub.close()
 
 
 def self_test():
