@@ -231,7 +231,11 @@ function drawOverlay() {
   });
   ctx.restore();
 
-  channelsState.forEach(raw => {
+  // Draw the selected channel last so its outline sits on top of any overlapping box -
+  // otherwise the channel you're actively moving can be visually buried under another,
+  // making it unclear which one is selected.
+  const drawOrder = [...channelsState].sort((a, b) => (a.id === selectedId) - (b.id === selectedId));
+  drawOrder.forEach(raw => {
     const c = displayedChannel(raw);
     const color = colorFor(c.id);
     const x = c.x * canvas.width, y = c.y * canvas.height;
@@ -309,9 +313,16 @@ function hitTestPerson(nx, ny) {
 }
 
 function hitTestChannel(nx, ny) {
-  for (let i = channelsState.length - 1; i >= 0; i--) {
-    const c = channelsState[i];
-    if (c.tracking) continue; // tracked channels aren't manually dragged
+  const manual = channelsState.filter(c => !c.tracking); // tracked channels aren't manually dragged
+  // Draw order is array order (later index = drawn on top), so among overlapping boxes
+  // hit-test topmost-first. But the already-selected channel takes priority over every
+  // other box: once you've selected #2, clicking inside it must grab #2 even where #3
+  // overlaps on top of it - otherwise the top box steals the click, which is exactly
+  // "2번을 옮기려는데 3번이 잡힌다". Select the channel you want (its card), then it
+  // wins the grab regardless of stacking.
+  const topFirst = [...manual].reverse();
+  const ordered = [...topFirst.filter(c => c.id === selectedId), ...topFirst.filter(c => c.id !== selectedId)];
+  for (const c of ordered) {
     const hx = c.x + c.w, hy = c.y + c.h;
     if (Math.abs(nx - hx) < 0.02 && Math.abs(ny - hy) < 0.02) return { id: c.id, mode: "resize" };
     if (nx >= c.x && nx <= c.x + c.w && ny >= c.y && ny <= c.y + c.h) return { id: c.id, mode: "move" };
