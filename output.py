@@ -51,13 +51,12 @@ def rtsp_cmd(url, fps=30, audio_src=None):
     # rapid connect/read/disconnect loops and never rendered a frame (plain black).
     # Keeping packets under the threshold at the source avoids the remux entirely.
     #
-    # -rtsp_transport tcp (not udp, despite UI-PLAN.md's original low-latency-over-UDP
-    # call): every diagnostic in this investigation that explicitly forced TCP played back
-    # correctly, while real players (which default to UDP for RTSP reads) kept getting
-    # stuck. UDP packet loss/reordering - even on loopback - is the likely common thread
-    # behind the black-screen, frozen-frame, and A/V-desync symptoms. TCP is reliable and
-    # ordered; the latency cost is negligible on localhost. mediamtx.yml must also set
-    # `rtspTransports: [tcp]` or it'll still let readers negotiate UDP independently.
+    # -rtsp_transport tcp: tried reverting to udp for lower latency once the tracker/
+    # channel-delete bugs were fixed, on the theory those (not transport) were the real
+    # cause - reproduced the identical stuck-frame symptom immediately (a continuous
+    # decode test showed 11 consecutive byte-identical frames after frame 3). UDP packet
+    # loss/reordering is a real, independent problem on this setup, not just a red herring
+    # from the other bugs. Back to TCP; the latency cost is the accepted tradeoff.
     cmd += ["-pkt_size", "1200", "-f", "rtsp", "-rtsp_transport", "tcp", url]
     return cmd
 
