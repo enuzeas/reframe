@@ -37,8 +37,10 @@
       RTSP와 동시 송출도 가능하도록 `publishers` 리스트로 일반화.
 - [x] 실동작 확인: 합성 4K 루프 영상 → 파이프라인 → `NDIPublisher` → 별도 프로세스의
       `cyndilib.finder.Finder`가 mDNS로 `reframe-live-test` 소스를 실제로 발견 (네트워크
-      레벨 왕복 확인 완료). OBS `obs-ndi`에서 소스 선택해 화면으로 보는 것까지는 GUI라
-      사용자 육안 확인 필요.
+      레벨 왕복 확인 완료).
+- [x] **OBS 육안 확인 완료(2026-07-04)**: OBS NDI Source에서 `reframe-out1` 선택 → 실제
+      웹캠(FaceTime HD Camera, index 3) 프레임이 화면에 나오는 것 확인. RTSP와 마찬가지로
+      NDI 경로도 끝까지(발행→디스커버리→OBS 렌더링) 검증 완료.
 - [x] `pyproject.toml`에 `cyndilib` 추가, `Brewfile`에 NDI SDK가 brew로 설치 안 되는 이유와
       설치처(NDI Tools) 메모.
 
@@ -56,6 +58,5 @@
 
 4K 카메라 없이 먼저 할 수 있는 것부터 (줌/패닝 검증과 독립적):
 
-1. OBS에서 `reframe-live-test` NDI 소스를 실제로 열어 화면 확인 (사용자 육안 검증만 남음)
-2. 오디오 먹싱 — 캡처카드나 마이크 입력으로 A/V 동기 검증
-3. 4K 카메라 확보되면 줌/패닝 육안 검증으로 M3 마무리
+1. 오디오 먹싱 — 캡처카드나 마이크 입력으로 A/V 동기 검증
+2. 4K 카메라 확보되면 줌/패닝 육안 검증으로 M3 마무리
