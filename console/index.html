@@ -105,7 +105,7 @@ input[type=range] { accent-color: var(--ch-color, var(--accent)); }
       <div class="canvas-wrap">
         <img id="preview" src="/api/preview.mjpg" alt="live preview">
         <canvas id="stage"></canvas>
-        <div class="canvas-hint">점선 = 감지된 인물 · 실선 = 크롭 프레임(드래그 이동 / 모서리 리사이즈) · 추적 ON 상태에서 인물 클릭 시 바인딩</div>
+        <div class="canvas-hint">점선 = 감지된 인물 · 실선 = 크롭 프레임 · 채널 선택 후 드래그로 이동 / 모서리로 리사이즈 · 추적 ON인 선택 채널에서 인물 클릭 시 바인딩 (Esc = 선택 해제)</div>
       </div>
     </div>
     <div class="side-panel">
@@ -349,10 +349,14 @@ canvas.addEventListener("pointerdown", (e) => {
     } else {
       selectedId = hit.id;
     }
-  } else {
-    selectedId = null;
+    renderPanel();
   }
-  renderPanel();
+  // Empty-space clicks used to clear the selection (selectedId = null). But a click
+  // that just misses a person while binding, or misses a box edge by a few px while
+  // reaching to drag/resize it, would silently wipe the selection the user had just
+  // made from the card - so the very next action (bind / move / resize) had no target
+  // and did nothing until they re-selected. That's the "채널을 눌러도 고정이 안 되는"
+  // case. Selection now sticks until another channel's box is clicked or Esc is pressed.
 });
 
 window.addEventListener("pointermove", (e) => {
@@ -398,6 +402,7 @@ window.addEventListener("keydown", (e) => {
   if ((e.key === "Delete" || e.key === "Backspace") && selectedId && document.activeElement === document.body) {
     deleteChannel(selectedId);
   }
+  if (e.key === "Escape" && selectedId !== null) { selectedId = null; renderPanel(); }
 });
 
 // ---- API calls ----
