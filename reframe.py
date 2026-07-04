@@ -39,7 +39,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--src", default="0", help="camera index or video file")
     ap.add_argument("--mode", type=int, default=1, choices=[1, 2, 3])
-    ap.add_argument("--model", default="yolov8n.pt")
+    ap.add_argument("--model", default="yolo26n.pt")
     ap.add_argument("--detect-every", type=int, default=DETECT_EVERY,
                      help="run YOLO every Nth frame, reusing the last boxes in between")
     ap.add_argument("--rtsp-out", help="rtsp:// URL to publish tile 0 to (e.g. rtsp://localhost:8554/out1)")

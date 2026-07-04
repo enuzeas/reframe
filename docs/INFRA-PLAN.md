@@ -174,7 +174,7 @@
 | 외부 도구(ffmpeg, mediamtx) | 저장소 루트 `Brewfile` + `brew bundle` | §11 체크리스트의 수동 나열을 명령어 한 줄로 대체, 버전 고정. 아직 어떤 코드도 안 씀(M3에서 사용 시작) |
 | 서비스 등록 | `deploy/launchd/*.plist` 템플릿 + `scripts/install-services.sh` | §5의 launchd 구조를 스크립트로 자동화 — M6에서 실제 서비스(pipeline/encode/api)가 생긴 뒤 작성 |
 | 설정값 | `~/Library/Application Support/reframe/config.yaml` (레포에 기본값, 로컬에 오버라이드) | 채널 배치·캡처 장치 인덱스 등 머신별 값 분리(§8) — 채널/UI 백엔드가 생기는 M4~M5 이후에 의미가 있어 아직 안 만듦 |
-| 모델 가중치 | `yolov8n.pt` sha256 `f59b3d83...fc83b36` (2026-07-04 다운로드분) | 계획 초안은 YOLO11n을 가정했지만 프로토타입 기본값은 `yolov8n.pt` — PLAN.md §3.1의 YOLO11n 전환은 아직 미착수, 전환 시 이 해시도 갱신할 것. 파일 자체는 `.gitignore`(`*.pt`)로 커밋 제외, Ultralytics가 첫 실행 시 자동 다운로드 |
+| 모델 가중치 | `yolo26n.pt` sha256 `9b09cc8b...a8ad4fef` (2026-07-04 다운로드분) | PLAN.md §3.1은 원래 YOLO11n을 가정했지만 프로토타입 기본값은 `yolov8n.pt`로 방치돼 있었음(문서/코드 불일치 — 최초 커밋부터 있던 문제). YOLO11n을 거치지 않고 바로 YOLO26n으로 전환(NMS-free, mAP·CPU 속도 둘 다 YOLO11n보다 우위 — [비교표](https://docs.ultralytics.com/compare/yolo26-vs-yolo11)). 파일 자체는 `.gitignore`(`*.pt`)로 커밋 제외, Ultralytics가 첫 실행 시 자동 다운로드 |
 
 업그레이드 경로: 운영 머신 수가 늘거나 비개발자가 설치해야 하는 상황이 실제로 생기면, 그때
 Homebrew tap(`brew install reframe`) 또는 서명된 `.app`으로 승격한다 — 지금은 조건이

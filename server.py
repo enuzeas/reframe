@@ -407,7 +407,7 @@ def main():
     ap.add_argument("--src", default="0", help="camera index or video file")
     ap.add_argument("--mode", type=int, default=1, choices=[1, 2, 3],
                      help="startup preset only (1=multi/2=quad/3=single); change live via /api/preset")
-    ap.add_argument("--model", default="yolov8n.pt")
+    ap.add_argument("--model", default="yolo26n.pt")
     ap.add_argument("--detect-every", type=int, default=DETECT_EVERY)
     ap.add_argument("--rtsp-out-base", help="e.g. rtsp://localhost:8554/out -> out1..out4")
     ap.add_argument("--ndi-out-base", help="e.g. reframe-out -> reframe-out1..reframe-out4")

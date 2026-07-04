@@ -33,8 +33,15 @@
 
 ## 3. 기술 선정 (리서치 근거)
 
-### 3.1 인물 감지 — Ultralytics YOLO11n (person class)
+### 3.1 인물 감지 — Ultralytics YOLO26n (person class)
 
+- 원래는 YOLO11n을 계획했으나(아래 근거는 YOLO11n 기준으로 작성된 그대로 유지), 실제
+  구현 기본값은 YOLO11n 전환 없이 `yolov8n.pt`로 방치돼 있었음(최초 커밋부터 있던
+  문서/코드 불일치). 2026-07-04 YOLO26 출시분 확인 후 YOLO11n을 건너뛰고 YOLO26n으로
+  직행 — NMS-free(DFL도 제거, 저전력 엣지 가속기 호환성↑), nano 기준 mAP(50-95)
+  40.9 vs YOLO11n 39.5, CPU ONNX 38.9ms vs 56.1ms로 정확도·속도 둘 다 우위
+  ([Ultralytics 비교표](https://docs.ultralytics.com/compare/yolo26-vs-yolo11)).
+  아래 RT-DETR/YuNet 비교 논리는 YOLO 계열 전체에 그대로 적용됨.
 - YOLO11은 멀티스트림 실시간 배포의 실용적 선택지. RT-DETR 계열이 군중/가림 장면에서
   정확도가 더 높지만 프레임당 지연이 커서 실시간 제약에 불리.
 - 얼굴 전용 감지기(YuNet 1.6ms, SCRFD)는 더 빠르지만, 프레이밍에는 몸 전체 박스가 필요.
