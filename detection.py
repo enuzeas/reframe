@@ -9,7 +9,14 @@ def detect_people(model, frame, device=None):
     fh, fw = frame.shape[:2]
     scale = DETECT_W / fw
     small = cv2.resize(frame, (DETECT_W, int(fh * scale)))
-    res = model.track(small, persist=True, classes=[0], verbose=False, device=device)[0]
+    # tracker="bytetrack.yaml": PLAN.md §3.2 chose ByteTrack (throughput priority, no
+    # camera motion compensation step), but model.track() never actually specified it -
+    # ultralytics silently used its own current default instead (tracktrack.yaml here,
+    # which runs GMC via sparseOptFlow). That GMC step's "not enough matching points"
+    # warnings lined up exactly with this session's periodic ~0.2-1s pipeline stalls on
+    # this camera's jittery frame timing/sizing. ByteTrack has no GMC at all.
+    res = model.track(small, persist=True, classes=[0], verbose=False, device=device,
+                       tracker="bytetrack.yaml")[0]
     people = []
     if res.boxes is not None and res.boxes.id is not None:
         for box, tid in zip(res.boxes.xyxy.cpu().numpy(), res.boxes.id.int().cpu().numpy()):
