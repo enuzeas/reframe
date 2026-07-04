@@ -1,9 +1,33 @@
 # next — 지금 할 일
 
-상태: **M3 부분 완료 · 4K 카메라 대기로 일시정지** · 전체 순서는 [ROADMAP.md](ROADMAP.md) 참조
+상태: **M4 완료(읽기 전용 콘솔) · M3 오디오 먹싱만 미착수** · 전체 순서는 [ROADMAP.md](ROADMAP.md) 참조
 
 이 파일은 살아있는 체크리스트다. 마일스톤이 끝나면 완료 표시하고, 다음 마일스톤의 세부
 작업으로 내용을 갈아치운다 (지난 마일스톤 기록은 ROADMAP.md 표에만 남긴다 — 여기서 중복 안 함).
+
+## M4 — 4채널 확장 + 컨트롤 서버 (완료, 2026-07-04)
+
+- [x] `sources.py`: OpenCV 인덱스 기반 장치 probe + 썸네일 + 해상도 probe. ffmpeg 장치
+      이름을 안 믿는 이유는 UI-PLAN.md §2a에 실측 근거와 함께 기록.
+- [x] `state.py`: `PipelineState`(락으로 보호되는 최신 프레임/오버레이/소스 인덱스),
+      `CommandQueue`(입력 전환 커맨드 전달).
+- [x] `server.py`/`reframe-server`: FastAPI 단일 프로세스(캡처+추론 루프는 백그라운드
+      스레드) — `/api/state`, `/api/sources`, `/api/sources/{id}/thumbnail.jpg`,
+      `/api/sources/{id}/resolutions`, `POST /api/input`, `/api/preview.mjpg`(MJPEG),
+      `WS /ws`(오버레이 ~10Hz). `--self-test`로 TestClient 기반 회귀 테스트.
+- [x] 4채널 송출: `--rtsp-out-base`/`--ndi-out-base`로 tiles[0..3] 각각 독립 publisher —
+      실카메라(Cam Link 4K)로 RTSP 4채널(ffprobe) + NDI 4채널(Finder 디스커버리) 모두 확인.
+- [x] `console/index.html`: 읽기 전용 프리뷰(MJPEG) + 캔버스 오버레이(WS) + 썸네일 기반
+      소스 선택 + 해상도 드롭다운 + 적용.
+- [x] 문서 정정: UI-PLAN.md §2a(썸네일 기반 선택으로), INFRA-PLAN.md §2(프로세스 분리
+      M6으로 유예 각주).
+
+### 검증 완료 / 남은 것
+
+- [x] 백엔드 API 전부 curl/websockets 스크립트로 실동작 확인, MJPEG 프레임 시각 확인
+- [x] 4채널 RTSP·NDI 각각 독립 송출 확인
+- [ ] `console/index.html`을 실제 브라우저로 열어 캔버스 오버레이 렌더링 육안 확인(이번
+      세션은 API/백엔드까지만 자동 검증 — 프런트엔드 JS 자체는 브라우저에서 직접 확인 필요)
 
 ## M3 — 송출 PoC (부분 완료, 2026-07-04)
 
@@ -47,7 +71,8 @@
 ### 줌/패닝 시각 검증 (완료, 2026-07-04 — 실제 4K 카메라)
 
 Elgato Cam Link 4K 확보 후 실측. 장치 인덱스는 이전과 마찬가지로 ffmpeg 이름과 OpenCV
-인덱스가 다르므로 프레임 내용으로 직접 대조해 확인(`/tmp/cam_probe2_0.jpg` 등).
+인덱스가 다르므로 프레임 내용으로 직접 대조해 확인(`/tmp/cam_probe2_0.jpg` 등) — 이 경험이
+M4의 `sources.py` 썸네일 기반 선택 설계로 이어짐.
 
 - **MULTI 모드(zoom=1.6, 풀바디 목표)**: 데스크 세팅이라 카메라-피사체 거리가 짧아
   `bbox_h`가 프레임의 71~76%를 차지 → `1.6배` 곱하면 프레임 높이를 넘어서 `clamp_window`가
@@ -68,7 +93,9 @@ Elgato Cam Link 4K 확보 후 실측. 장치 인덱스는 이전과 마찬가지
 
 ## 완료되면 (지금 여기)
 
-M3의 핵심 검증은 끝났다. 남은 건:
+M3(오디오 먹싱 제외)·M4 핵심 검증은 끝났다. 남은 건:
 
-1. 오디오 먹싱 — 캡처카드나 마이크 입력으로 A/V 동기 검증
-2. M4(컨트롤 서버) 착수 — UI-PLAN.md §2a(입력 소스 선택)부터
+1. `console/index.html` 실제 브라우저 육안 확인
+2. 오디오 먹싱 — 캡처카드나 마이크 입력으로 A/V 동기 검증
+3. M5(편집 UI 연동) — `mockup/index.html`의 크롭 이동/리사이즈/트래킹 바인딩을 M4의
+   `/api/*` 백엔드에 실배선 (지금은 `console/index.html`이 읽기 전용이라 별도 페이지)

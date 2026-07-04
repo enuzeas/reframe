@@ -12,10 +12,14 @@ dependencies = [
     "opencv-python>=4.9",
     "lap>=0.5.12",
     "cyndilib>=0.0.9",  # NDI output (--ndi-out); needs NDI SDK runtime installed separately, see Brewfile
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",  # [standard] pulls in websockets, needed for WS /ws
+    "httpx>=0.27",  # only for TestClient in server.py's --self-test
 ]
 
 [project.scripts]
 reframe = "reframe:main"
+reframe-server = "server:main"
 
 [tool.setuptools]
-py-modules = ["reframe", "smoothing", "geometry", "detection", "tracking", "modes", "display", "output"]
+py-modules = ["reframe", "smoothing", "geometry", "detection", "tracking", "modes", "display", "output", "sources", "state", "server"]

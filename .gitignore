@@ -4,3 +4,5 @@ __pycache__/
 .DS_Store
 *.pt
 *.egg-info/
+auto.crt   # mediamtx auto-generates these (RTSPS TLS) when run from this dir
+auto.key

@@ -7,8 +7,10 @@
 
 | 것 | 실체 | 안 되는 것 |
 |---|---|---|
-| [reframe.py](../reframe.py) | 4K→HD 3모드 크롭 CLI 진입점 (cv2 창에 2×2 프리뷰, `--rtsp-out`으로 RTSP 송출도 가능). 기능별로 [smoothing.py](../smoothing.py)/[geometry.py](../geometry.py)/[detection.py](../detection.py)/[tracking.py](../tracking.py)/[modes.py](../modes.py)/[display.py](../display.py)/[output.py](../output.py)로 분리돼 있음 | 웹 UI, Syphon/NDI, 오디오 먹싱, 4채널 동시 송출 — 아직 1채널 RTSP까지만 |
-| [mockup/index.html](../mockup/index.html) | UI-PLAN.md 인터랙션을 확인하기 위한 정적 목업 (더미 인물이 움직임) | 실제 파이프라인과 연결 안 됨 — 클릭하면 캔버스 안에서만 반응 |
+| [reframe.py](../reframe.py) | 4K→HD 3모드 크롭 CLI 진입점 (cv2 창에 2×2 프리뷰, `--rtsp-out`/`--ndi-out`으로 1채널 송출도 가능). 기능별로 [smoothing.py](../smoothing.py)/[geometry.py](../geometry.py)/[detection.py](../detection.py)/[tracking.py](../tracking.py)/[modes.py](../modes.py)/[display.py](../display.py)/[output.py](../output.py)로 분리돼 있음 | 4채널 동시 송출, 웹 컨트롤, 오디오 먹싱 — 이건 `reframe-server` 몫 |
+| [server.py](../server.py) | `reframe-server` — FastAPI 컨트롤 서버. 캡처+추론 루프를 백그라운드 스레드로 돌리며 4채널 RTSP/NDI 동시 송출 + MJPEG 프리뷰 + WebSocket 오버레이 + 입력 소스/해상도 전환 API | 크롭 편집·트래킹 바인딩(M5), 오디오, 프로세스 분리(M6) |
+| [console/index.html](../console/index.html) | `reframe-server`용 읽기 전용 콘솔 — MJPEG 프리뷰 위 캔버스 오버레이(감지 박스) + 썸네일 기반 카메라/해상도 선택 | 편집 불가(읽기 전용) — [mockup/index.html](../mockup/index.html)이 그 시뮬레이션 담당 |
+| [mockup/index.html](../mockup/index.html) | UI-PLAN.md 편집 인터랙션을 확인하기 위한 정적 목업 (더미 인물이 움직임) | 실제 파이프라인과 연결 안 됨 — 클릭하면 캔버스 안에서만 반응(M5에서 실배선 대상) |
 | [docs/pdf/UI-PLAN.pdf](pdf/UI-PLAN.pdf) | UI-PLAN.md를 인쇄한 스냅샷 | 최신 UI-PLAN.md 수정을 반영 안 함 — 필요하면 재출력 |
 
 ## 1. 파이프라인 프로토타입 돌리기
@@ -75,6 +77,32 @@ RTSP와 동시에 켜도 된다 (`--rtsp-out`과 `--ndi-out`을 같이 넘기면
 NDI SDK(`libndi.dylib`)는 brew로 안 깔린다 — proprietary 배포판이라 [NDI Tools](https://ndi.video/tools/)로
 따로 설치해야 한다(이 머신은 이미 설치돼 있음). `cyndilib`(pip 패키지)는 그 SDK를 링크만 한다.
 
+## 1d. 컨트롤 서버로 4채널 동시 송출 + 읽기 전용 콘솔 (M4)
+
+```bash
+mediamtx /tmp/mediamtx.yml   # RTSP 쓸 거면 (1b 참고)
+reframe-server --src 0 --mode 1 \
+  --rtsp-out-base rtsp://localhost:8554/out \
+  --ndi-out-base reframe-out
+```
+
+`out1..out4`(RTSP) / `reframe-out1..4`(NDI) 4채널이 각각 독립적으로 뜬다 — OBS에서 채널당
+하나씩 소스로 추가하면 4개 화면을 동시에 받을 수 있다(1b/1c와 같은 방식, 채널 수만 4개).
+
+브라우저로 `console/index.html`을 열면(정적 파일이라 `open console/index.html`로 바로 열어도
+되고, `/api/*` 호출은 절대경로라 `http://localhost:8000`을 향한다) 라이브 프리뷰(2×2 합성)와
+감지 박스 오버레이, 카메라/해상도 선택 UI를 볼 수 있다 — **읽기 전용**, 크롭 이동/리사이즈는
+아직 안 됨(M5).
+
+API만 확인하고 싶으면:
+
+```bash
+curl localhost:8000/api/state
+curl localhost:8000/api/sources
+```
+
+`reframe-server --self-test`로 카메라 없이 API 응답 형태만 빠르게 회귀 테스트할 수 있다.
+
 ## 2. UI 목업 열어보기
 
 ```bash
@@ -97,9 +125,11 @@ open /Users/enujes/Sync/dev/reframe/mockup/index.html
 
 ## 4. 아직 없는 것 (착각하지 말 것)
 
-- FastAPI 컨트롤 서버, Syphon/NDI 연동, 4채널 동시 송출, 오디오 먹싱 — 설계만 끝남(M3 나머지~M6)
-- 줌/패닝 육안 검증 — 노트북 웹캠 화각 한계로 보류, 실 4K 카메라 필요(§1b)
-- launchd 서비스 — 미착수(M6)
-- 목업의 인터랙션과 실제 파이프라인 연결 — 미착수(M5)
+- 오디오 먹싱 — 캡처카드 오디오 입력 필요, 미착수(M3 나머지)
+- Syphon 연동 — obs-syphon 플러그인 없음, NDI로 대체 완료(§1c)
+- 크롭 편집(이동/리사이즈/삭제/추가), 트래킹 바인딩 UI — `console/index.html`은 읽기 전용,
+  `mockup/index.html`의 인터랙션과 실제 파이프라인 연결은 미착수(M5)
+- launchd 서비스, pipeline/api 프로세스 분리 — 미착수(M6, INFRA-PLAN.md §2 각주)
 
-`pyproject.toml` 패키징(M2)과 RTSP 송출 1채널(M3 일부)은 완료됐다 — 위 §1, §1b가 그 결과.
+`pyproject.toml` 패키징(M2), RTSP·NDI 1채널 송출(M3), 줌/패닝 육안 검증(M3, 실 4K 카메라로
+완료), 4채널 컨트롤 서버(M4)는 전부 완료됐다 — 위 §1~§1d가 그 결과.

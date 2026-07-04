@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>reframe console</title>
+<style>
+  :root {
+    --bg: #14161a;
+    --surface: #1d2026;
+    --border: #2c3038;
+    --text: #e6e8eb;
+    --text-dim: #8a8f98;
+    --accent: #4fd1c5;
+    --box-color: #ffd166;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.4 -apple-system, "SF Pro Text", sans-serif;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 0.95rem; font-weight: 600; margin: 0; }
+  header .stat { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+  main { display: grid; grid-template-columns: 1fr 260px; gap: 1rem; padding: 1rem; }
+  .video-wrap {
+    position: relative;
+    background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+    aspect-ratio: 16 / 9;
+  }
+  .video-wrap img, .video-wrap canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+  aside {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem;
+  }
+  aside h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); margin: 0 0 0.5rem; }
+  .thumbs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.4rem; margin-bottom: 0.75rem; }
+  .thumbs button {
+    padding: 0;
+    border: 2px solid var(--border);
+    border-radius: 4px;
+    background: none;
+    cursor: pointer;
+    overflow: hidden;
+    aspect-ratio: 4 / 3;
+  }
+  .thumbs button img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumbs button.selected { border-color: var(--accent); }
+  select, button.apply {
+    width: 100%;
+    padding: 0.4rem;
+    margin-top: 0.4rem;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+  button.apply { cursor: pointer; }
+  button.apply:hover { border-color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>reframe console</h1>
+  <span class="stat">mode <span id="stat-mode">-</span></span>
+  <span class="stat">fps <span id="stat-fps">-</span></span>
+</header>
+<main>
+  <div class="video-wrap">
+    <img id="preview" src="/api/preview.mjpg" alt="live preview">
+    <canvas id="overlay"></canvas>
+  </div>
+  <aside>
+    <h2>입력 소스</h2>
+    <div class="thumbs" id="thumbs"></div>
+    <select id="resolutions"></select>
+    <button class="apply" id="apply">적용</button>
+  </aside>
+</main>
+<script>
+const img = document.getElementById("preview");
+const canvas = document.getElementById("overlay");
+const ctx = canvas.getContext("2d");
+let selectedSource = null;
+
+function resizeCanvas() {
+  canvas.width = canvas.clientWidth;
+  canvas.height = canvas.clientHeight;
+}
+window.addEventListener("resize", resizeCanvas);
+img.addEventListener("load", resizeCanvas, { once: true });
+
+function drawOverlay(overlay) {
+  document.getElementById("stat-mode").textContent = overlay.mode ?? "-";
+  document.getElementById("stat-fps").textContent = overlay.fps ?? "-";
+  if (!canvas.width) resizeCanvas();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--box-color");
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 4]);
+  for (const box of overlay.boxes ?? []) {
+    const x = box.x1 * canvas.width;
+    const y = box.y1 * canvas.height;
+    const w = (box.x2 - box.x1) * canvas.width;
+    const h = (box.y2 - box.y1) * canvas.height;
+    ctx.strokeRect(x, y, w, h);
+    ctx.setLineDash([]);
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.font = "12px sans-serif";
+    ctx.fillText(`ID ${box.track_id}`, x + 4, y + 14);
+    ctx.setLineDash([6, 4]);
+  }
+}
+
+function connectOverlayWs() {
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onmessage = (ev) => drawOverlay(JSON.parse(ev.data));
+  ws.onclose = () => setTimeout(connectOverlayWs, 1000);
+}
+connectOverlayWs();
+
+async function loadResolutions(id) {
+  const res = await fetch(`/api/sources/${id}/resolutions`);
+  const list = await res.json();
+  const select = document.getElementById("resolutions");
+  select.innerHTML = list.map((r) => `<option value="${r.width}x${r.height}">${r.width}×${r.height}</option>`).join("");
+}
+
+async function loadSources() {
+  const res = await fetch("/api/sources");
+  const devices = await res.json();
+  const state = await (await fetch("/api/state")).json();
+  const thumbs = document.getElementById("thumbs");
+  thumbs.innerHTML = "";
+  for (const dev of devices) {
+    const btn = document.createElement("button");
+    btn.className = dev.id === state.source_id ? "selected" : "";
+    btn.innerHTML = `<img src="/api/sources/${dev.id}/thumbnail.jpg" alt="camera ${dev.id}">`;
+    btn.onclick = () => {
+      selectedSource = dev.id;
+      [...thumbs.children].forEach((c) => c.classList.remove("selected"));
+      btn.classList.add("selected");
+      loadResolutions(dev.id);
+    };
+    thumbs.appendChild(btn);
+    if (dev.id === state.source_id) {
+      selectedSource = dev.id;
+      loadResolutions(dev.id);
+    }
+  }
+}
+
+document.getElementById("apply").onclick = async () => {
+  if (selectedSource === null) return;
+  const [width, height] = document.getElementById("resolutions").value.split("x").map(Number);
+  await fetch("/api/input", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source_id: selectedSource, width, height }),
+  });
+};
+
+loadSources();
+</script>
+</body>
+</html>
