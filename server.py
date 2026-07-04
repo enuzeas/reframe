@@ -268,9 +268,16 @@ def pipeline_loop(args, state: PipelineState, cmdq: CommandQueue, stop_event: th
         # frame instead of the newest one). Not all backends honor this, but AVFoundation
         # does.
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        if width and height:
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        # Request the highest resolution by default (cv2.VideoCapture.set() silently
+        # falls back to whatever the device actually supports - see sources.py - so this
+        # is safe even on cameras that can't do 4K). Without this, a camera opened with
+        # no explicit request just keeps whatever low-res default it powers on with -
+        # confirmed live: this exact gap left a 1080p-capable camera stuck at 640x480
+        # for an entire session because only the /api/input resolution-switch path ever
+        # set width/height, never the initial open.
+        w, h = (width, height) if width and height else (3840, 2160)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
         return cap
 
     src = int(args.src) if args.src.isdigit() else args.src
