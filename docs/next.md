@@ -42,8 +42,20 @@
 - [ ] MULTI/QUAD의 "full" 줌이 데스크 세팅에서 풀프레임으로 클램프되는 현상 재확인(M3와
       동일한 원인 — 카메라-피사체 거리 부족, 코드 문제 아님. `MIN_CROP_FRACTION` 로직이
       새 채널 모델에도 동일하게 올바르게 적용되고 있다는 뜻이라 오히려 정상 신호)
-- [ ] `console/index.html`의 드래그/리사이즈 인터랙션 자체는 이번 세션에 브라우저로
-      직접 조작해보지 않음(API/백엔드까지만 자동 검증) — 실제 마우스 조작 확인 필요
+- [x] **브라우저 육안 확인 완료(2026-07-04, Playwright 헤드리스 크로미움으로 실제 마우스
+      조작)**: 실행 중 버그 2건 발견·수정 —
+      1. `console/index.html`이 상대경로 `fetch("/api/...")`/`ws://location.host`를 쓰는데
+         `reframe-server`가 그 파일 자체를 서빙하지 않아서 `open console/index.html`로 직접
+         열면 API 호출이 실패함. `server.py`에 `StaticFiles` 마운트 추가로 같은 origin에서
+         서빙하도록 수정.
+      2. 대기 중(target_id 미지정) 채널은 `render_channel`이 placeholder만 반환하고
+         `clamp_window`를 안 태우므로 x/y/w/h가 생성 시점 픽셀값에 고정돼 있는데, 프레임
+         크기가 그 사이 바뀌면(카메라 J0Sunvail가 프레임마다 크기가 미세하게 다른 걸
+         ultralytics GMC 경고로 확인) 정규화 시 0~1 범위를 벗어날 수 있음 — `_normalized_channel`에
+         방어적 클램프 추가.
+      실제로 확인된 정상 동작: 라이브 프리뷰 렌더링, 인물 클릭→대기 채널 바인딩(카드가
+      LIVE로 전환), 비트래킹 채널 드래그로 크롭 위치 실제 이동(전/후 좌표 및 스크린샷으로
+      확인).
 
 ## M4 — 4채널 확장 + 컨트롤 서버 (완료, 2026-07-04)
 

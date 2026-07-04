@@ -135,9 +135,9 @@ open /Users/enujes/Sync/dev/reframe/mockup/index.html
 - 오디오 먹싱 — 캡처카드 오디오 입력 필요, 미착수(M3 나머지)
 - Syphon 연동 — obs-syphon 플러그인 없음, NDI로 대체 완료(§1c)
 - launchd 서비스, pipeline/api 프로세스 분리 — 미착수(M6, INFRA-PLAN.md §2 각주)
-- `console/index.html`의 드래그/리사이즈를 실제 마우스로 조작해보는 육안 확인 — API/백엔드
-  경로는 curl로 검증했지만 브라우저 조작 자체는 이번 세션에 직접 해보지 않음
 
 `pyproject.toml` 패키징(M2), RTSP·NDI 1채널 송출(M3), 줌/패닝 육안 검증(M3, 실 4K 카메라로
 완료), 4채널 컨트롤 서버(M4), 크롭 편집·트래킹 바인딩 API 연동(M5)은 전부 완료됐다 —
-위 §1~§1d가 그 결과.
+위 §1~§1d가 그 결과. `console/index.html`의 드래그/클릭바인딩도 헤드리스 브라우저로 실제
+마우스 조작까지 확인 완료(next.md M5 섹션 참고) — 그 과정에서 정적 파일 서빙 누락과
+대기 채널 좌표 정규화 버그 2건을 잡음.
