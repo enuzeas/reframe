@@ -27,3 +27,10 @@ def placeholder(label):
     img = np.full((HD_H, HD_W, 3), 32, np.uint8)
     cv2.putText(img, label, (60, HD_H // 2), cv2.FONT_HERSHEY_SIMPLEX, 2, (200, 200, 200), 3)
     return img
+
+
+def full_frame(frame):
+    """Whole source frame resized to HD, no crop - the safe fallback for a live
+    broadcast output. A gray placeholder tile is fine in a local debug preview
+    (modes.py's 2x2 grid) but is a broadcast accident on an actual output channel."""
+    return cv2.resize(frame, (HD_W, HD_H))

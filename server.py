@@ -171,13 +171,14 @@ def _downscale(frame, max_width=PREVIEW_MAX_WIDTH):
 
 
 def _normalized_channel(c, fw, fh):
-    """Channels waiting for a tracking target never hit clamp_window (render_channel
-    returns early with a placeholder), so their x/y/w/h stay frozen in whatever pixel
-    units they had at creation time. If the frame size drifts afterward - confirmed
-    this session with a webcam (J0Sunvail) whose frames aren't even consistently
-    sized frame-to-frame, per ultralytics' own GMC size-mismatch warnings - those
-    stale pixel values can normalize to outside 0..1. Clamp defensively rather than
-    let the client draw a rect off the edge of the canvas."""
+    """render_channel() now updates x/y/w/h to the full frame while waiting/lost
+    (falls back to showing the whole frame rather than a placeholder), so this no
+    longer has stale frozen coordinates to worry about in that specific case - kept
+    as a defensive clamp regardless, since a frame-size drift mid-flight (confirmed
+    this session with a webcam whose frames weren't even consistently sized
+    frame-to-frame, per ultralytics' own GMC warnings) could still normalize
+    something to outside 0..1 in principle. Cheap insurance against the client
+    drawing a rect off the edge of the canvas."""
     d = c.to_dict()
     d["x"] = max(0.0, min(1.0, d["x"] / fw))
     d["y"] = max(0.0, min(1.0, d["y"] / fh))
@@ -378,7 +379,9 @@ def self_test():
     assert (fixed.x, fixed.y, fixed.w, fixed.h) == (100, 100, 640, 360)  # unclamped, in bounds
 
     waiting = ch.Channel(2, 0, 0, 640, 360, tracking=True, target_id=None)
-    assert ch.render_channel(frame, {}, waiting) is not None  # placeholder image, doesn't crash
+    tile = ch.render_channel(frame, {}, waiting)
+    assert tile is not None and tile.shape == (1080, 1920, 3)  # full-frame fallback, not a placeholder
+    assert (waiting.x, waiting.y, waiting.w, waiting.h) == (0, 0, 3840, 2160)  # reflects the fallback, not frozen
     assert ch._status(waiting, {}) == "waiting"
 
     bbox = (7, 1000, 200, 1600, 1800)  # tid, x1, y1, x2, y2 - tall bbox

@@ -5,7 +5,7 @@ by reframe.py's plain-CLI path) rather than replacing them - this is the model
 server.py/console use for free-form channel editing (UI-PLAN.md §2-3), matching
 what mockup/index.html already validated with simulated data.
 """
-from geometry import clamp_window, crop_hd, placeholder
+from geometry import clamp_window, crop_hd, full_frame
 from smoothing import Smoother
 from tracking import Presence
 
@@ -92,7 +92,14 @@ def render_channel(frame, people_by_id, channel):
     bbox = people_by_id.get(channel.target_id) if channel.target_id is not None else None
     resolved, widen = channel.presence.resolve(key, bbox)
     if resolved is None:
-        return placeholder("추적 대상 선택 대기" if channel.target_id is None else "대상 소실")
+        # No target bound yet, or lost longer than Presence's hold window - never show
+        # a bare gray placeholder on an actual broadcast output (that's a broadcast
+        # accident waiting to happen), fall back to the full frame instead. Unlike the
+        # old placeholder-only path, this also updates x/y/w/h to reflect what's
+        # actually on screen instead of leaving them frozen at whatever pixel values
+        # existed when the channel started waiting.
+        channel.x, channel.y, channel.w, channel.h = 0, 0, fw, fh
+        return full_frame(frame)
 
     _, x1, y1, x2, y2 = resolved
     anchor = ANCHOR_FRAC.get(channel.zoom, 0.5)
