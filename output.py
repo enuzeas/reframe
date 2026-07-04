@@ -22,11 +22,17 @@ def rtsp_cmd(url, fps=30, audio_src=None):
            # frame by when it actually arrived instead.
            "-use_wallclock_as_timestamps", "1", "-i", "-"]
     if audio_src is not None:
-        # avfoundation audio already has its own accurate hardware capture clock - adding
-        # wallclock there too made libopus see occasional out-of-order ("Queue input is
-        # backward in time") timestamps and silently drop those frames, confirmed by
-        # removing it here and watching the warning disappear.
-        cmd += ["-f", "avfoundation", "-i", f":{audio_src}"]
+        # Also wallclock here, despite avfoundation audio having its own accurate hardware
+        # clock: that clock is a monotonic/uptime-based domain, not wall-clock epoch time,
+        # and mixing it with the video input's epoch-based wallclock PTS put the two streams
+        # in incomparable time domains. A downstream reader parsing the muxed RTSP session
+        # computed a nonsensical negative relative start ("start: -3.6..."), and video
+        # decoding stalled after the first frame - confirmed with a continuous capture test
+        # (frame count kept climbing per ffmpeg's own stats, but 0 bytes ever got muxed).
+        # Keeping both wallclock (same domain) reintroduces the occasional
+        # "Queue input is backward in time" dropped audio frame, which is the smaller
+        # problem by far.
+        cmd += ["-f", "avfoundation", "-use_wallclock_as_timestamps", "1", "-i", f":{audio_src}"]
     cmd += ["-c:v", "h264_videotoolbox", "-realtime", "true", "-bf", "0", "-g", str(fps), "-b:v", "8M"]
     if audio_src is not None:
         cmd += ["-c:a", "libopus", "-b:a", "128k", "-ar", "48000"]

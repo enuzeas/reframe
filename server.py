@@ -387,11 +387,14 @@ def self_test():
     # video always gets wallclock timestamps (declared fps is the camera's nominal rate,
     # not the pipeline's actual throughput - without this the encoder's PTS runs ahead
     # of real time and live players stall after the first frame). audio_src adds a
-    # second avfoundation input + Opus encode, wallclock only on the video side.
+    # second avfoundation input + Opus encode - also wallclock, so both streams share the
+    # same epoch-based time domain (mixing wallclock video with audio's own native/uptime
+    # clock desynced the two enough that readers computed a negative start offset and
+    # video decoding stalled after frame 0).
     plain = rtsp_cmd("rtsp://x/out1", fps=30)
     assert plain.count("-use_wallclock_as_timestamps") == 1 and "-c:a" not in plain
     muxed = rtsp_cmd("rtsp://x/out1", fps=30, audio_src=2)
-    assert muxed.count("-use_wallclock_as_timestamps") == 1  # video input only, not audio
+    assert muxed.count("-use_wallclock_as_timestamps") == 2  # both inputs, same time domain
     assert "avfoundation" in muxed and ":2" in muxed and "libopus" in muxed
 
     chunk = mjpeg_chunk(state)
