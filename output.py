@@ -20,7 +20,7 @@ def rtsp_cmd(url, fps=30, audio_src=None):
            # with IINA) show the first frame then stall, waiting for "future" PTS to become
            # due as real frames trickle in slower than declared. Wallclock timestamps each
            # frame by when it actually arrived instead.
-           "-use_wallclock_as_timestamps", "1", "-i", "-"]
+           "-thread_queue_size", "1024", "-use_wallclock_as_timestamps", "1", "-i", "-"]
     if audio_src is not None:
         # Also wallclock here, despite avfoundation audio having its own accurate hardware
         # clock: that clock is a monotonic/uptime-based domain, not wall-clock epoch time,
@@ -32,7 +32,15 @@ def rtsp_cmd(url, fps=30, audio_src=None):
         # Keeping both wallclock (same domain) reintroduces the occasional
         # "Queue input is backward in time" dropped audio frame, which is the smaller
         # problem by far.
-        cmd += ["-f", "avfoundation", "-use_wallclock_as_timestamps", "1", "-i", f":{audio_src}"]
+        #
+        # -thread_queue_size on both inputs: confirmed live that removing audio entirely
+        # made video play back cleanly again, so combining the two inputs (not either one
+        # alone) is what breaks playback - ffmpeg's default input queue (8 packets) is a
+        # well-documented cause of exactly this "two independently-paced live inputs stall
+        # each other" class of bug when one source (our irregular Python write() cadence)
+        # doesn't keep pace with the other (avfoundation's steady real-time audio).
+        cmd += ["-thread_queue_size", "1024", "-f", "avfoundation",
+                "-use_wallclock_as_timestamps", "1", "-i", f":{audio_src}"]
     cmd += ["-c:v", "h264_videotoolbox", "-realtime", "true", "-bf", "0", "-g", str(fps), "-b:v", "8M"]
     if audio_src is not None:
         cmd += ["-c:a", "libopus", "-b:a", "128k", "-ar", "48000"]

@@ -195,12 +195,18 @@ class ChannelOutputs:
             if cid not in channel_ids:
                 pubs = self.by_id.pop(cid)
                 threading.Thread(target=lambda ps=pubs: [p.close() for p in ps], daemon=True).start()
+        # Audio only goes to the lowest-id channel (the full-shot/original in every
+        # preset) rather than all of them: four OBS sources would each carry their own
+        # copy of the same mic, needing three muted manually, and opening the same
+        # avfoundation device four times concurrently is unnecessary contention for no
+        # benefit - one channel's audio is all a scene actually plays at once anyway.
+        audio_channel_id = min(channel_ids) if channel_ids else None
         for cid in channel_ids:
             if cid not in self.by_id:
                 pubs = []
                 if self.rtsp_base:
                     pubs.append(RTSPPublisher(f"{self.rtsp_base}{cid}", fps=self.fps,
-                                               audio_src=self.audio_src))
+                                               audio_src=self.audio_src if cid == audio_channel_id else None))
                 if self.ndi_base:
                     pubs.append(NDIPublisher(f"{self.ndi_base}{cid}", fps=self.fps))
                 self.by_id[cid] = pubs
