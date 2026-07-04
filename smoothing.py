@@ -6,7 +6,16 @@ ONEEURO_MIN_CUTOFF = 3.0  # ponytail: bumped from 1.0 (2026-07-04 live test) - a
                           # filter treated ordinary head movement as noise to suppress,
                           # only reacting to fast/large moves (subject leaving frame).
                           # lower = smoother but laggier; raise further if still sluggish.
-ONEEURO_BETA = 0.7        # higher = less lag on fast moves, more jitter
+ONEEURO_BETA = 0.15       # ponytail: dropped from 0.7 (2026-07-04) - beta scales cutoff by
+                          # *velocity*, so at 0.7 almost any real detection noise (a person
+                          # naturally swaying, YOLO bbox jitter frame-to-frame) reads as
+                          # "fast movement" and lets jitter straight through, independent of
+                          # min_cutoff - confirmed with a synthetic noisy-signal test: cutting
+                          # min_cutoff in half barely changed frame-to-frame jitter, but
+                          # dropping beta 0.7->0.1 nearly halved it, for only a small lag
+                          # increase. This is also why the UI's smoothing slider (which only
+                          # adjusts min_cutoff) had barely any visible effect on shakiness.
+                          # higher = less lag on fast moves, more jitter on ordinary ones.
 ONEEURO_D_CUTOFF = 1.0    # derivative cutoff, rarely needs tuning
 
 
