@@ -308,7 +308,12 @@ function hitTestChannel(nx, ny) {
 canvas.addEventListener("pointerdown", (e) => {
   const { x, y } = toNorm(e.clientX, e.clientY);
 
-  const waitingChannel = channelsState.find(c => c.tracking && c.target_id === null);
+  // Only the selected channel can be bound - previously this bound whichever waiting
+  // channel happened to come first in channelsState, regardless of which one the user
+  // actually meant to bind (e.g. 3 waiting channels, user wants #3, but a person-click
+  // always grabbed #2 since it appeared earlier in the list). Select a waiting
+  // channel's card in the side panel first, then click a person to bind it.
+  const waitingChannel = channelsState.find(c => c.id === selectedId && c.tracking && c.target_id === null);
   if (waitingChannel) {
     const pid = hitTestPerson(x, y);
     if (pid !== null) {
