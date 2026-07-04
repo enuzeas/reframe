@@ -385,8 +385,17 @@ def self_test():
     tracked = ch.Channel(3, 0, 0, 640, 360, tracking=True, target_id=7, zoom="face")
     ch.render_channel(frame, {7: bbox}, tracked)
     assert tracked.h < (1800 - 200)  # face preset zooms in tighter than the raw bbox
+    assert tracked.y <= 200  # crop top stays above the head (y1=200), anchor-based framing
     assert ch._status(tracked, {7: bbox}) == "live"
     assert ch._status(tracked, {}) == "lost"  # target currently undetected
+
+    # waist and face must not collapse to the same size for an ordinary (non-distant)
+    # bbox - previously both landed on the same shared MIN_CROP_FRACTION floor
+    waist_ch = ch.Channel(4, 0, 0, 640, 360, tracking=True, target_id=7, zoom="waist")
+    ch.render_channel(frame, {7: bbox}, waist_ch)
+    face_ch = ch.Channel(5, 0, 0, 640, 360, tracking=True, target_id=7, zoom="face")
+    ch.render_channel(frame, {7: bbox}, face_ch)
+    assert waist_ch.h > face_ch.h
 
     state, cmdq = PipelineState(), CommandQueue()
     state.update(

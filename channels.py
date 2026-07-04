@@ -12,6 +12,16 @@ from tracking import Presence
 ZOOM_MULT = {"full": 1.3, "waist": 0.7, "face": 0.35}  # reuses modes.py's render_single
                                                         # values (measured this session),
                                                         # not mockup's eyeballed 1.3/0.7/0.32
+# Fraction of the tracked bbox's height, measured from the top (y1), that each preset
+# centers its crop on - i.e. which *part* of the whole-body box to actually follow,
+# not just how tightly to zoom. There's no dedicated face/head detector (only a
+# whole-person box from YOLO), so this is an anatomical approximation: a standing
+# adult's head/face center sits close to the top, "waist-up" framing centers around
+# the chest/upper torso, and "full" stays at the whole-body midpoint. Replaces the
+# previous approach (center on the whole-body midpoint always, then clamp upward
+# after the fact so a tight crop doesn't slice the head off) with picking the right
+# point to begin with.
+ANCHOR_FRAC = {"full": 0.5, "waist": 0.28, "face": 0.10}
 MIN_CROP_FRACTION = 0.5  # same rationale as tracking.py's constant - frame-relative floor
 DEFAULT_W = 1440         # new-channel default width (source coords), matches mockup
 
@@ -80,7 +90,8 @@ def render_channel(frame, people_by_id, channel):
         return placeholder("추적 대상 선택 대기" if channel.target_id is None else "대상 소실")
 
     _, x1, y1, x2, y2 = resolved
-    cx, cy = channel.smoother.update(key, (x1 + x2) / 2, (y1 + y2) / 2)
+    anchor = ANCHOR_FRAC.get(channel.zoom, 0.5)
+    cx, cy = channel.smoother.update(key, (x1 + x2) / 2, y1 + anchor * (y2 - y1))
     if channel.zoom in ZOOM_MULT:
         # Floor only applies to the auto-computed presets, which derive height from
         # the detected bbox and could otherwise shrink to near nothing for a distant/
@@ -113,16 +124,6 @@ def render_channel(frame, people_by_id, channel):
         # Manual mode should just hold the size the user picked; widen doesn't apply.
         target_h = channel.h
         ch_h = channel.smoother.scalar(f"{key}:h", target_h)
-    # Centering on the whole body's midpoint works for "full", but a tight crop (waist/
-    # face) centered there is roughly torso-height, not anywhere near the head - a person
-    # detector only gives a whole-body box, no separate head position, so a small crop
-    # naively centered on it can cut the top of the head off entirely. Bias upward: cap
-    # how low the crop center is allowed to sit so the top of the crop window never
-    # drops below a margin above the head (y1). Only actually pulls cy up when the zoom
-    # is tight enough for this to matter - "full" crops are already ~body-height and
-    # rarely hit this clamp.
-    head_margin = 0.1 * (y2 - y1)
-    cy = min(cy, y1 + ch_h / 2 - head_margin)
     tile = crop_hd(frame, cx, cy, ch_h)
     channel.x, channel.y, channel.w, channel.h = clamp_window(cx, cy, ch_h * 16 / 9, ch_h, fw, fh)
     return tile
