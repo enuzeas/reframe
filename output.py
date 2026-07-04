@@ -41,7 +41,13 @@ def rtsp_cmd(url, fps=30, audio_src=None):
         # doesn't keep pace with the other (avfoundation's steady real-time audio).
         cmd += ["-thread_queue_size", "1024", "-f", "avfoundation",
                 "-use_wallclock_as_timestamps", "1", "-i", f":{audio_src}"]
-    cmd += ["-c:v", "h264_videotoolbox", "-realtime", "true", "-bf", "0", "-g", str(fps), "-b:v", "8M"]
+    # GOP length capped at 15 (not `fps`, the camera's nominal rate) - keyframes only
+    # every `fps` frames meant ~1-2 real seconds between them at this pipeline's actual
+    # throughput (~15-40fps with detection running), adding to worst-case join/recovery
+    # latency on top of TCP's own delay. More frequent keyframes cost a little bitrate,
+    # not a lot at this resolution.
+    gop = min(int(fps), 15)
+    cmd += ["-c:v", "h264_videotoolbox", "-realtime", "true", "-bf", "0", "-g", str(gop), "-b:v", "8M"]
     if audio_src is not None:
         cmd += ["-c:a", "libopus", "-b:a", "128k", "-ar", "48000"]
     # ffmpeg's rtsp muxer defaults -pkt_size to 1472, over mediamtx's apparent 1440-byte
