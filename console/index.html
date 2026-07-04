@@ -143,6 +143,22 @@ let selectedId = null;
 let dragging = null;      // { id, mode, startX, startY, orig: {x,y,w,h} }
 let selectedSource = null;
 
+// renderPanel() rebuilds every card's DOM from scratch (innerHTML = "") on every WS
+// tick (10Hz) - a real mouse click's mousedown-to-mouseup span can straddle one of
+// those rebuilds, so the element the user pressed down on gets destroyed before
+// mouseup fires and the click event never registers at all. Playwright's synthetic
+// clicks are fast enough to reliably land between ticks, which is why automated
+// testing didn't catch this. Suppress rebuilds while the panel is actively being
+// clicked; a safety timeout guards against a stray pointerup (e.g. mouse released
+// outside the window) leaving this stuck on.
+let panelInteracting = false;
+let panelInteractingTimer = null;
+function markPanelInteracting() {
+  panelInteracting = true;
+  clearTimeout(panelInteractingTimer);
+  panelInteractingTimer = setTimeout(() => { panelInteracting = false; }, 400);
+}
+
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 function colorFor(id) { return CH_COLORS[(id - 1) % 4]; }
 
@@ -219,7 +235,7 @@ function connectWs() {
     channelsState = overlay.channels ?? [];
     document.getElementById("fps").textContent = overlay.fps ?? "-";
     drawOverlay();
-    renderPanel();
+    if (!panelInteracting) renderPanel();
   };
   ws.onclose = () => setTimeout(connectWs, 1000);
 }
@@ -442,6 +458,10 @@ document.getElementById("applySource").addEventListener("click", async () => {
 
 loadSources();
 renderPanel();
+// #channelList itself persists across renderPanel() rebuilds (only its children get
+// replaced), so a listener attached here - not per-card - survives them and catches
+// mousedown via bubbling from any button/select/input inside.
+document.getElementById("channelList").addEventListener("mousedown", markPanelInteracting);
 </script>
 </body>
 </html>
