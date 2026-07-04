@@ -1,9 +1,41 @@
 # next — 지금 할 일
 
-상태: **M5 완료(편집 UI 연동) · M3 오디오 먹싱만 미착수** · 전체 순서는 [ROADMAP.md](ROADMAP.md) 참조
+상태: **M5 완료(편집 UI 연동) · 오디오 먹싱 배선 완료(실 A/V 동기 육안 확인만 남음)** · 전체
+순서는 [ROADMAP.md](ROADMAP.md) 참조
 
 이 파일은 살아있는 체크리스트다. 마일스톤이 끝나면 완료 표시하고, 다음 마일스톤의 세부
 작업으로 내용을 갈아치운다 (지난 마일스톤 기록은 ROADMAP.md 표에만 남긴다 — 여기서 중복 안 함).
+
+## 오디오 먹싱 (배선 완료, 2026-07-04 — 실 청취 검증만 남음)
+
+`output.py`의 `RTSPPublisher`에 `audio_src`(avfoundation 오디오 장치 인덱스)를 추가 —
+지정하면 ffmpeg에 avfoundation 오디오 입력을 두 번째 `-i`로 추가해 Opus로 인코딩,
+RTSP 스트림에 h264와 함께 먹싱한다. `sources.probe_audio_devices()`로 장치 목록(인덱스+이름,
+ffmpeg 자체로만 열기 때문에 `probe_devices()`의 OpenCV/ffmpeg 인덱스 불일치 문제 없음) 조회.
+`reframe-server --audio-src <idx>`/`reframe.py --audio-src <idx>`로 노출. NDI 채널은 그대로
+비디오 전용(cyndilib에 오디오 프레임을 넣으려면 별도 실시간 캡처 라이브러리가 필요해 스킵 —
+UI-PLAN.md §4가 오디오의 기본 경로로 지정한 RTSP만 우선 구현).
+
+- [x] `-use_wallclock_as_timestamps`는 **비디오(stdin) 입력에만** 적용 — 처음엔 두 입력
+      모두에 걸었더니 `[libopus] Queue input is backward in time` 경고와 함께 오디오 프레임이
+      조용히 드롭됐음. avfoundation 오디오는 이미 정확한 하드웨어 캡처 클럭이 있어서 wallclock으로
+      덮어쓸 필요가 없고(클럭 없는 stdin 비디오만 필요), 제거하니 경고가 사라짐 — 실측으로 확인.
+- [x] **버그 1 (`RTSPPublisher.close()` 행)**: 오디오 없을 때는 `stdin.close()`만으로 ffmpeg가
+      EOF를 받아 종료했지만, 오디오 입력이 있으면 avfoundation 쪽은 EOF가 없는 살아있는
+      입력이라 `proc.wait(timeout=5)`가 항상 타임아웃 → 처리 안 된 예외가 파이프라인 스레드를
+      죽임(채널 삭제만 해도 전체 서버가 조용히 멈춤). `terminate()`→`kill()` 폴백 추가.
+- [x] **버그 2 (`ChannelOutputs.write()` 크래시)**: mediamtx 재시작/네트워크 hiccup으로 ffmpeg
+      쪽 파이프가 깨지면(`BrokenPipeError`) 다음 프레임 `write()`가 예외를 던져 파이프라인
+      스레드 전체가 죽음(오디오와 무관하게 항상 존재했던 취약점 — 이번에 여러 번 재현됨).
+      `OSError`를 잡아 죽은 publisher만 버리고 다음 `sync()`에서 자동 재생성하도록 수정 —
+      실측: 채널 삭제 반복, 강제 broken-pipe 유발 양쪽 다 파이프라인이 안 죽고 자가 복구됨.
+- [x] 실측: `ffprobe`로 RTSP 채널이 `0,h264,video` + `1,opus,audio` 두 스트림을 실제로
+      들고 있는 것 확인(4채널 전부), 오디오 패킷이 실제로 흐르는 것도 여러 번 확인(`-read_intervals`).
+- [ ] **남은 것**: 4채널 동시 + YOLO 감지 부하가 있는 라이브 파이프라인에서는 관찰된 오디오
+      패킷 처리량이 격리 테스트보다 훨씬 sparse했음(정확한 원인 미확정 — ffmpeg 먹서 내부
+      타이밍 이슈로 추정, 코드상 크래시나 무음은 아님). **실제 사람이 마이크에 대고 말하며
+      OBS에서 들어보는 육안(귀) 확인**이 필요 — M3 줌/패닝 검증 때와 같은 종류의 남은 작업
+      (자동화 스크립트로는 "소리가 들리는가"를 판단할 수 없음).
 
 ## M5 — 편집 UI 연동 (완료, 2026-07-04)
 
@@ -139,15 +171,14 @@ M4의 `sources.py` 썸네일 기반 선택 설계로 이어짐.
 
 ### 남은 것
 
-- [ ] 오디오 먹싱 A/V 동기 검증 — 캡처카드 오디오 입력 필요
+- [ ] 오디오 먹싱 실 청취 A/V 동기 확인 — 배선/버그 수정은 완료, 위 "오디오 먹싱" 섹션 참고
 - [ ] (필요시만) WebRTC/WHEP 경로 확인
 - [ ] MULTI 모드 풀바디 줌 재검증 — 카메라-피사체 거리 확보되는 환경에서
 
 ## 완료되면 (지금 여기)
 
-M3(오디오 먹싱 제외)·M4 핵심 검증은 끝났다. 남은 건:
+M3·M4·M5 핵심 검증과 오디오 먹싱 배선은 끝났다. 남은 건:
 
-1. `console/index.html` 실제 브라우저 육안 확인
-2. 오디오 먹싱 — 캡처카드나 마이크 입력으로 A/V 동기 검증
-3. M5(편집 UI 연동) — `mockup/index.html`의 크롭 이동/리사이즈/트래킹 바인딩을 M4의
-   `/api/*` 백엔드에 실배선 (지금은 `console/index.html`이 읽기 전용이라 별도 페이지)
+1. 오디오 먹싱 실 청취 확인 — 사람이 마이크에 말하면서 OBS에서 들리는지 (자동화 불가 항목)
+2. MULTI 모드 풀바디 줌 재검증 — 카메라-피사체 거리 확보되는 환경에서
+3. M6 — 서비스화(launchd, 채널 배치 영속화)

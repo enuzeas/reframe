@@ -110,6 +110,19 @@ curl -X POST localhost:8000/api/preset/single
 
 `reframe-server --self-test`로 카메라 없이 채널 CRUD + 렌더 로직 회귀 테스트를 빠르게 돌릴 수 있다.
 
+오디오를 같이 먹싱하려면 `--audio-src <avfoundation 오디오 장치 인덱스>`를 추가한다(장치
+목록은 `ffmpeg -f avfoundation -list_devices true -i ""`의 "AVFoundation audio devices"
+섹션, 또는 `python3 -c "import sources; print(sources.probe_audio_devices())"`):
+
+```bash
+reframe-server --src 0 --mode 1 --rtsp-out-base rtsp://localhost:8554/out --audio-src 2
+```
+
+각 RTSP 채널이 h264 비디오 + Opus 오디오 두 스트림을 갖는다(`ffprobe`로 확인 가능). 비디오
+캡처에 쓰는 장치와 **다른** 오디오 장치를 고르는 걸 권장 — 같은 물리 장치(예: 웹캠 내장
+마이크)를 OpenCV(비디오)와 ffmpeg(오디오)가 동시에 열면 경합이 생길 수 있다(이번 세션
+실측: 데스크 마이크 대신 분리된 장치로 바꾸니 훨씬 안정적).
+
 ## 2. UI 목업 열어보기
 
 ```bash
@@ -132,7 +145,10 @@ open /Users/enujes/Sync/dev/reframe/mockup/index.html
 
 ## 4. 아직 없는 것 (착각하지 말 것)
 
-- 오디오 먹싱 — 캡처카드 오디오 입력 필요, 미착수(M3 나머지)
+- 오디오 먹싱 실 청취 확인 — 배선(§1d `--audio-src`)은 완료, 사람이 마이크에 말하면서
+  OBS에서 들리는지 확인만 남음(자동화 불가, M3 나머지)
+- NDI 채널의 오디오 — RTSP만 오디오 지원, NDI는 여전히 비디오 전용(cyndilib에 실시간 오디오
+  캡처를 연결하려면 별도 라이브러리 필요 - 필요해지면 추가)
 - Syphon 연동 — obs-syphon 플러그인 없음, NDI로 대체 완료(§1c)
 - launchd 서비스, pipeline/api 프로세스 분리 — 미착수(M6, INFRA-PLAN.md §2 각주)
 
