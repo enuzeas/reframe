@@ -21,10 +21,12 @@ import argparse
 import asyncio
 import threading
 import time
+from pathlib import Path
 
 import cv2
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 import sources
 from channels import PRESETS, Channel, next_channel_id, render_channels
@@ -32,6 +34,7 @@ from detection import detect_people
 from output import NDIPublisher, RTSPPublisher
 from state import CommandQueue, PipelineState
 
+CONSOLE_DIR = Path(__file__).parent / "console"
 DETECT_EVERY = 2
 MJPEG_FPS = 12
 OVERLAY_HZ = 10
@@ -140,6 +143,12 @@ def make_app(state: PipelineState, cmdq: CommandQueue) -> FastAPI:
         except WebSocketDisconnect:
             pass
 
+    # Mounted last: console/index.html uses relative fetch("/api/...") and
+    # ws://location.host/ws, so it has to be served from this same origin
+    # rather than opened as a local file:// page (those calls would 404/fail).
+    if CONSOLE_DIR.exists():
+        app.mount("/", StaticFiles(directory=str(CONSOLE_DIR), html=True), name="console")
+
     return app
 
 
@@ -151,8 +160,18 @@ def _downscale(frame, max_width=PREVIEW_MAX_WIDTH):
 
 
 def _normalized_channel(c, fw, fh):
+    """Channels waiting for a tracking target never hit clamp_window (render_channel
+    returns early with a placeholder), so their x/y/w/h stay frozen in whatever pixel
+    units they had at creation time. If the frame size drifts afterward - confirmed
+    this session with a webcam (J0Sunvail) whose frames aren't even consistently
+    sized frame-to-frame, per ultralytics' own GMC size-mismatch warnings - those
+    stale pixel values can normalize to outside 0..1. Clamp defensively rather than
+    let the client draw a rect off the edge of the canvas."""
     d = c.to_dict()
-    d["x"], d["y"], d["w"], d["h"] = d["x"] / fw, d["y"] / fh, d["w"] / fw, d["h"] / fh
+    d["x"] = max(0.0, min(1.0, d["x"] / fw))
+    d["y"] = max(0.0, min(1.0, d["y"] / fh))
+    d["w"] = max(0.0, min(1.0, d["w"] / fw))
+    d["h"] = max(0.0, min(1.0, d["h"] / fh))
     return d
 
 
