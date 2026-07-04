@@ -149,14 +149,27 @@ let selectedSource = null;
 // mouseup fires and the click event never registers at all. Playwright's synthetic
 // clicks are fast enough to reliably land between ticks, which is why automated
 // testing didn't catch this. Suppress rebuilds while the panel is actively being
-// clicked; a safety timeout guards against a stray pointerup (e.g. mouse released
-// outside the window) leaving this stuck on.
+// interacted with.
 let panelInteracting = false;
 let panelInteractingTimer = null;
 function markPanelInteracting() {
   panelInteracting = true;
   clearTimeout(panelInteractingTimer);
   panelInteractingTimer = setTimeout(() => { panelInteracting = false; }, 400);
+}
+// A <select>'s native dropdown can stay open for however long the user takes to pick
+// an option - much longer than the 400ms button-click window above. If a rebuild
+// happens while it's still open, the element backing that open dropdown gets
+// destroyed out from under it: the dropdown keeps showing (browser-rendered chrome,
+// already detached from anything live) but clicking an option in it does nothing,
+// which is exactly "계속 반짝거리기만 하고 바꿀 수가 없다". Track focus for the
+// select's entire open duration instead of a fixed timeout.
+function clearPanelInteractingIfFocusLeft() {
+  setTimeout(() => {
+    if (!document.getElementById("channelList").contains(document.activeElement)) {
+      panelInteracting = false;
+    }
+  }, 50); // let focus move to a new element inside the panel register first
 }
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
@@ -296,8 +309,23 @@ window.addEventListener("pointermove", (e) => {
   if (dragging.mode === "move") {
     dragging.current = { ...o, x: clamp(o.x + dx, 0, 1 - o.w), y: clamp(o.y + dy, 0, 1 - o.h) };
   } else {
-    const w = clamp(o.w + dx, 480 / frameW, 1 - o.x);
-    dragging.current = { ...o, w, h: w * 9 / 16 };
+    // Output is always encoded 16:9 in real pixels (crop_hd), but x/y/w/h here are
+    // normalized to the *source* frame's own width/height - which isn't necessarily
+    // 16:9 itself (this session's camera defaulted to 4:3 640x480 at one point).
+    // `h = w * 9/16` ignored that and only holds when frameW/frameH happens to already
+    // be 16:9 - on any other source aspect ratio, the live drag preview showed a
+    // rectangle whose shape didn't match what the server would actually crop and
+    // encode once it landed. Correct conversion: match 16:9 in pixels, not in
+    // frame-relative fractions.
+    const pxAspect = (frameW / frameH) * (9 / 16);
+    // Only dx drove resizing before, so dragging the corner straight down did nothing
+    // and the box's corner visually detached from the cursor. Let whichever axis the
+    // user actually moved further determine the new size; the other follows via the
+    // aspect lock, same convention as holding shift in a design tool.
+    const wFromDx = o.w + dx;
+    const wFromDy = (o.h + dy) / pxAspect;
+    const w = clamp(Math.abs(dx) >= Math.abs(dy) ? wFromDx : wFromDy, 480 / frameW, 1 - o.x);
+    dragging.current = { ...o, w, h: w * pxAspect };
   }
   drawOverlay();
 });
@@ -459,9 +487,12 @@ document.getElementById("applySource").addEventListener("click", async () => {
 loadSources();
 renderPanel();
 // #channelList itself persists across renderPanel() rebuilds (only its children get
-// replaced), so a listener attached here - not per-card - survives them and catches
-// mousedown via bubbling from any button/select/input inside.
-document.getElementById("channelList").addEventListener("mousedown", markPanelInteracting);
+// replaced), so listeners attached here - not per-card - survive them and catch
+// events via bubbling from any button/select/input inside.
+const channelListEl = document.getElementById("channelList");
+channelListEl.addEventListener("mousedown", markPanelInteracting);
+channelListEl.addEventListener("focusin", () => { panelInteracting = true; });
+channelListEl.addEventListener("focusout", clearPanelInteractingIfFocusLeft);
 </script>
 </body>
 </html>
