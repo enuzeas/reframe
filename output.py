@@ -30,7 +30,13 @@ def rtsp_cmd(url, fps=30, audio_src=None):
     cmd += ["-c:v", "h264_videotoolbox", "-realtime", "true", "-bf", "0", "-g", str(fps), "-b:v", "8M"]
     if audio_src is not None:
         cmd += ["-c:a", "libopus", "-b:a", "128k", "-ar", "48000"]
-    cmd += ["-f", "rtsp", "-rtsp_transport", "udp", url]
+    # ffmpeg's rtsp muxer defaults -pkt_size to 1472, over mediamtx's apparent 1440-byte
+    # threshold - mediamtx was logging "RTP packets are too big (1460 > 1440), remuxing
+    # them into smaller ones" for every channel, and OBS's own RTP depacketizer (unlike
+    # IINA/mpv, which tolerated it) choked on the reassembled packets: its log showed
+    # rapid connect/read/disconnect loops and never rendered a frame (plain black).
+    # Keeping packets under the threshold at the source avoids the remux entirely.
+    cmd += ["-pkt_size", "1200", "-f", "rtsp", "-rtsp_transport", "udp", url]
     return cmd
 
 
