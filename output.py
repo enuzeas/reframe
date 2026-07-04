@@ -57,12 +57,13 @@ def rtsp_cmd(url, fps=30, audio_src=None):
     # rapid connect/read/disconnect loops and never rendered a frame (plain black).
     # Keeping packets under the threshold at the source avoids the remux entirely.
     #
-    # -rtsp_transport tcp: tried reverting to udp for lower latency once the tracker/
-    # channel-delete bugs were fixed, on the theory those (not transport) were the real
-    # cause - reproduced the identical stuck-frame symptom immediately (a continuous
-    # decode test showed 11 consecutive byte-identical frames after frame 3). UDP packet
-    # loss/reordering is a real, independent problem on this setup, not just a red herring
-    # from the other bugs. Back to TCP; the latency cost is the accepted tradeoff.
+    # -rtsp_transport tcp: retested udp twice, including once after closing other apps
+    # and confirming system load average had actually dropped (~9 -> ~7.7 on 8 cores) -
+    # reproduced the identical stuck-frame symptom both times regardless of load (17
+    # consecutive byte-identical decoded frames starting at frame 3 the second time).
+    # Rules out "just this machine being busy" as the explanation; something in the UDP
+    # publish/mediamtx-relay path is genuinely broken here, not merely loss-prone under
+    # contention. TCP costs latency but is the one that actually works.
     cmd += ["-pkt_size", "1200", "-f", "rtsp", "-rtsp_transport", "tcp", url]
     return cmd
 
