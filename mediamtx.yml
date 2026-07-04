@@ -1,0 +1,16 @@
+# mediamtx config for reframe. Run from the repo root: mediamtx mediamtx.yml
+#
+# rtspTransports: [tcp] - not the default (which also allows UDP). Confirmed
+# repeatedly on this project: publishing/reading over UDP reproduces a stuck-frame bug
+# (decoder gets the first keyframe, then never advances - real time keeps passing but
+# the picture doesn't) independent of system load, and reframe's own RTSPPublisher
+# (output.py) publishes over TCP to match. Leaving this at the mediamtx default would
+# let a reader (OBS, IINA, ...) still negotiate UDP on its own, hitting the same bug
+# even though the publish side is fine.
+rtspTransports: [tcp]
+
+# Without this, mediamtx's default (empty) path config rejects any path name reframe
+# tries to publish to with 400/404 - reframe creates channels dynamically (out1..out4,
+# any id as channels are added/removed), so there's no fixed path list to declare.
+paths:
+  all_others:

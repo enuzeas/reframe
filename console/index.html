@@ -146,6 +146,7 @@ let frameW = 3840, frameH = 2160;
 let selectedId = null;
 let dragging = null;      // { id, mode, startX, startY, orig: {x,y,w,h} }
 let selectedSource = null;
+let rtspOutBase = null; // from /api/state - the actual --rtsp-out-base, not a guess
 
 // renderPanel() rebuilds every card's DOM from scratch (innerHTML = "") on every WS
 // tick (10Hz) - a real mouse click's mousedown-to-mouseup span can straddle one of
@@ -441,7 +442,11 @@ async function applyPreset(name) {
 document.querySelectorAll(".presets button").forEach(b => b.addEventListener("click", () => applyPreset(b.dataset.preset)));
 
 // ---- side panel ----
-function channelUrl(c) { return `rtsp://localhost:8554/out${c.id}`; }
+// --rtsp-out-base is whatever the server was actually started with (any host/port/
+// path), not necessarily "rtsp://localhost:8554/out" - hardcoding that here showed a
+// URL that didn't match reality the entire time this console ran with a different
+// base configured. NDI-only setups have no RTSP base at all.
+function channelUrl(c) { return rtspOutBase ? `${rtspOutBase}${c.id}` : "(RTSP 미설정)"; }
 
 function renderPanel() {
   const list = document.getElementById("channelList");
@@ -538,6 +543,7 @@ async function loadResolutions(id) {
 async function loadSources() {
   const devices = await (await fetch("/api/sources")).json();
   const state = await (await fetch("/api/state")).json();
+  rtspOutBase = state.rtsp_out_base ?? null;
   const thumbs = document.getElementById("thumbs");
   thumbs.innerHTML = "";
   for (const dev of devices) {

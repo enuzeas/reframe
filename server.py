@@ -60,13 +60,14 @@ def mjpeg_chunk(state: PipelineState):
     return b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
 
 
-def make_app(state: PipelineState, cmdq: CommandQueue) -> FastAPI:
+def make_app(state: PipelineState, cmdq: CommandQueue, rtsp_out_base=None, ndi_out_base=None) -> FastAPI:
     app = FastAPI()
 
     @app.get("/api/state")
     def get_state():
         _, overlay, source_id = state.snapshot()
-        return {"fps": overlay.get("fps"), "source_id": source_id}
+        return {"fps": overlay.get("fps"), "source_id": source_id,
+                "rtsp_out_base": rtsp_out_base, "ndi_out_base": ndi_out_base}
 
     @app.get("/api/sources")
     def get_sources():
@@ -396,11 +397,14 @@ def self_test():
                  "fps": 30.0},
         source_id=0,
     )
-    app = make_app(state, cmdq)
+    app = make_app(state, cmdq, rtsp_out_base="rtsp://localhost:8554/out", ndi_out_base="reframe-out")
     client = TestClient(app)
 
     r = client.get("/api/state")
-    assert r.status_code == 200 and r.json() == {"fps": 30.0, "source_id": 0}
+    assert r.status_code == 200 and r.json() == {
+        "fps": 30.0, "source_id": 0,
+        "rtsp_out_base": "rtsp://localhost:8554/out", "ndi_out_base": "reframe-out",
+    }
 
     r = client.get("/api/channels")
     assert r.status_code == 200 and r.json()[0]["id"] == 1
@@ -477,7 +481,7 @@ def main():
     thread = threading.Thread(target=pipeline_loop, args=(args, state, cmdq, stop_event), daemon=True)
     thread.start()
 
-    app = make_app(state, cmdq)
+    app = make_app(state, cmdq, rtsp_out_base=args.rtsp_out_base, ndi_out_base=args.ndi_out_base)
     import uvicorn
     try:
         uvicorn.run(app, host=args.host, port=args.port)
