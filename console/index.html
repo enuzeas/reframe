@@ -326,11 +326,19 @@ canvas.addEventListener("pointerdown", (e) => {
     }
   }
 
+  // Same rule as binding: a channel has to be selected before it can be moved/resized.
+  // Previously the very first click on a channel both selected it and immediately
+  // started dragging it in the same gesture - easy to nudge a channel by accident
+  // just trying to select it. Now the first click only selects; drag only starts once
+  // that channel is already the selected one.
   const hit = hitTestChannel(x, y);
   if (hit) {
-    selectedId = hit.id;
-    const c = channelsState.find(ch => ch.id === hit.id);
-    dragging = { id: hit.id, mode: hit.mode, startX: x, startY: y, orig: { x: c.x, y: c.y, w: c.w, h: c.h }, current: { x: c.x, y: c.y, w: c.w, h: c.h } };
+    if (hit.id === selectedId) {
+      const c = channelsState.find(ch => ch.id === hit.id);
+      dragging = { id: hit.id, mode: hit.mode, startX: x, startY: y, orig: { x: c.x, y: c.y, w: c.w, h: c.h }, current: { x: c.x, y: c.y, w: c.w, h: c.h } };
+    } else {
+      selectedId = hit.id;
+    }
   } else {
     selectedId = null;
   }
