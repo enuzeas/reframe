@@ -182,9 +182,28 @@ function resizeCanvas() {
 window.addEventListener("resize", resizeCanvas);
 preview.addEventListener("load", resizeCanvas, { once: true });
 
+// Server updates arrive over WS at 10Hz; drawing directly from each message only
+// (as before) redraws in visible steps every ~100ms. mockup/index.html's fluid
+// per-person motion comes from lerping a `smoothPos` toward the latest target on a
+// 60fps requestAnimationFrame loop, independent of how often the target itself
+// updates - same technique here, keyed by channel id.
+const displayPos = {}; // channelId -> {x,y,w,h}, eased toward channelsState's targets
+function lerp(a, b, t) { return a + (b - a) * t; }
+function updateDisplayPos() {
+  const alpha = 0.25;
+  channelsState.forEach(c => {
+    if (dragging && dragging.id === c.id) { displayPos[c.id] = { ...dragging.current }; return; }
+    const d = displayPos[c.id];
+    if (!d) { displayPos[c.id] = { x: c.x, y: c.y, w: c.w, h: c.h }; return; }
+    d.x = lerp(d.x, c.x, alpha);
+    d.y = lerp(d.y, c.y, alpha);
+    d.w = lerp(d.w, c.w, alpha);
+    d.h = lerp(d.h, c.h, alpha);
+  });
+}
 function displayedChannel(c) {
-  if (dragging && dragging.id === c.id) return { ...c, ...dragging.current };
-  return c;
+  const d = displayPos[c.id];
+  return d ? { ...c, ...d } : c;
 }
 
 function drawOverlay() {
@@ -247,12 +266,20 @@ function connectWs() {
     frameH = overlay.frame_h ?? frameH;
     channelsState = overlay.channels ?? [];
     document.getElementById("fps").textContent = overlay.fps ?? "-";
-    drawOverlay();
+    // Drawing itself now happens continuously in the requestAnimationFrame loop below,
+    // which eases toward whatever channelsState holds - no need to draw here too.
     if (!panelInteracting) renderPanel();
   };
   ws.onclose = () => setTimeout(connectWs, 1000);
 }
 connectWs();
+
+function animate() {
+  updateDisplayPos();
+  drawOverlay();
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
 
 // ---- pointer interaction (drag/resize channels, click-to-bind tracking) ----
 function toNorm(clientX, clientY) {
