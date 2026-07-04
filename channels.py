@@ -89,9 +89,20 @@ def render_channel(frame, people_by_id, channel):
         # before turning tracking on (confirmed: a 360px-tall manual box grew past
         # 1000px the moment tracking resolved a target).
         target_h = max(ZOOM_MULT[channel.zoom] * (y2 - y1), fh * MIN_CROP_FRACTION)
+        ch_h = channel.smoother.scalar(f"{key}:h", target_h * widen)
     else:
+        # "manual" has no bbox to re-derive target_h from each frame - it reads back
+        # channel.h, which clamp_window below overwrites with whatever ch_h comes out
+        # to. That makes it self-referential: applying `widen` here (meant to buy a
+        # preset a bit of margin while a target is ambiguously missing) has nothing
+        # external to snap back to once the target reappears, so each missed-detection
+        # frame permanently ratchets the size up by another `widen` factor. Confirmed:
+        # 15 frames of the target briefly not detected (ordinary tracking noise, not
+        # even a real occlusion) inflated a 360px-tall manual box to full frame height
+        # and it never recovered even after 10 more frames of clean redetection.
+        # Manual mode should just hold the size the user picked; widen doesn't apply.
         target_h = channel.h
-    ch_h = channel.smoother.scalar(f"{key}:h", target_h * widen)
+        ch_h = channel.smoother.scalar(f"{key}:h", target_h)
     # Centering on the whole body's midpoint works for "full", but a tight crop (waist/
     # face) centered there is roughly torso-height, not anywhere near the head - a person
     # detector only gives a whole-body box, no separate head position, so a small crop
