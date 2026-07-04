@@ -456,7 +456,12 @@ function renderPanel() {
     card.querySelector('[data-action=delete]').addEventListener("click", (ev) => { ev.stopPropagation(); deleteChannel(c.id); });
     card.querySelector('[data-action=toggle-track]').addEventListener("click", (ev) => {
       ev.stopPropagation();
-      patchChannel(c.id, c.tracking ? { tracking: false, target_id: null } : { tracking: true });
+      // zoom: "manual" on turning tracking on - otherwise whatever zoom preset was
+      // last set (often still "full" from a previous preset/session) takes over the
+      // instant a target resolves, and the crop height becomes the tracked person's
+      // bbox height times that preset's multiplier - completely ignoring the size
+      // the user had just manually set. "Manual" is what actually keeps it.
+      patchChannel(c.id, c.tracking ? { tracking: false, target_id: null } : { tracking: true, zoom: "manual" });
     });
     card.querySelector('[data-action=zoom]').addEventListener("change", (ev) => patchChannel(c.id, { zoom: ev.target.value }));
     card.querySelector('[data-action=smoothing]').addEventListener("input", (ev) => patchChannel(c.id, { smoothing: +ev.target.value }));

@@ -81,8 +81,17 @@ def render_channel(frame, people_by_id, channel):
 
     _, x1, y1, x2, y2 = resolved
     cx, cy = channel.smoother.update(key, (x1 + x2) / 2, (y1 + y2) / 2)
-    target_h = ZOOM_MULT[channel.zoom] * (y2 - y1) if channel.zoom in ZOOM_MULT else channel.h
-    ch_h = channel.smoother.scalar(f"{key}:h", max(target_h, fh * MIN_CROP_FRACTION) * widen)
+    if channel.zoom in ZOOM_MULT:
+        # Floor only applies to the auto-computed presets, which derive height from
+        # the detected bbox and could otherwise shrink to near nothing for a distant/
+        # small person. "manual" is a size the user picked deliberately - flooring it
+        # to 50% of frame height defeated the entire point of setting a small size
+        # before turning tracking on (confirmed: a 360px-tall manual box grew past
+        # 1000px the moment tracking resolved a target).
+        target_h = max(ZOOM_MULT[channel.zoom] * (y2 - y1), fh * MIN_CROP_FRACTION)
+    else:
+        target_h = channel.h
+    ch_h = channel.smoother.scalar(f"{key}:h", target_h * widen)
     # Centering on the whole body's midpoint works for "full", but a tight crop (waist/
     # face) centered there is roughly torso-height, not anywhere near the head - a person
     # detector only gives a whole-body box, no separate head position, so a small crop
