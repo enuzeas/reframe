@@ -31,7 +31,7 @@ from fastapi.staticfiles import StaticFiles
 import sources
 from channels import PRESETS, Channel, next_channel_id, render_channels
 from detection import detect_people
-from output import NDIPublisher, RTSPPublisher
+from output import NDIPublisher, RTSPPublisher, rtsp_cmd
 from state import CommandQueue, PipelineState
 
 CONSOLE_DIR = Path(__file__).parent / "console"
@@ -178,8 +178,9 @@ def _normalized_channel(c, fw, fh):
 class ChannelOutputs:
     """Opens/closes RTSP/NDI publishers per channel id as channels are added/removed."""
 
-    def __init__(self, rtsp_base, ndi_base, fps):
+    def __init__(self, rtsp_base, ndi_base, fps, audio_src=None):
         self.rtsp_base, self.ndi_base, self.fps = rtsp_base, ndi_base, fps
+        self.audio_src = audio_src
         self.by_id = {}
 
     def sync(self, channel_ids):
@@ -191,14 +192,26 @@ class ChannelOutputs:
             if cid not in self.by_id:
                 pubs = []
                 if self.rtsp_base:
-                    pubs.append(RTSPPublisher(f"{self.rtsp_base}{cid}", fps=self.fps))
+                    pubs.append(RTSPPublisher(f"{self.rtsp_base}{cid}", fps=self.fps,
+                                               audio_src=self.audio_src))
                 if self.ndi_base:
                     pubs.append(NDIPublisher(f"{self.ndi_base}{cid}", fps=self.fps))
                 self.by_id[cid] = pubs
 
     def write(self, channel_id, tile):
-        for pub in self.by_id.get(channel_id, []):
-            pub.write(tile)
+        """A dead publisher (ffmpeg exited - mediamtx restart, network hiccup) must
+        not kill the whole pipeline thread: drop it and let the next sync() reopen
+        it fresh instead of raising out of the render loop."""
+        try:
+            for pub in self.by_id.get(channel_id, []):
+                pub.write(tile)
+        except OSError as e:
+            print(f"reframe-server: channel {channel_id} output died ({e}), reopening next frame")
+            for pub in self.by_id.pop(channel_id, []):
+                try:
+                    pub.close()
+                except OSError:
+                    pass
 
     def close_all(self):
         for pubs in self.by_id.values():
@@ -247,7 +260,7 @@ def pipeline_loop(args, state: PipelineState, cmdq: CommandQueue, stop_event: th
     state.update(source_id=src if isinstance(src, int) else None)
 
     out_fps = cap.get(cv2.CAP_PROP_FPS) or 30
-    outputs = ChannelOutputs(args.rtsp_out_base, args.ndi_out_base, out_fps)
+    outputs = ChannelOutputs(args.rtsp_out_base, args.ndi_out_base, out_fps, audio_src=args.audio_src)
 
     channel_list = None  # built from the startup preset once we know the frame size
     fps, t0 = 0.0, time.time()
@@ -371,6 +384,14 @@ def self_test():
     assert r.status_code == 200
     assert cmdq.drain() == [{"type": "switch_input", "source_id": 1, "width": 1920, "height": 1080}]
 
+    # audio mux: video-only cmd unchanged (no regression), audio_src adds a second
+    # avfoundation input + Opus encode + wallclock timestamps on both (A/V sync)
+    plain = rtsp_cmd("rtsp://x/out1", fps=30)
+    assert "-use_wallclock_as_timestamps" not in plain and "-c:a" not in plain
+    muxed = rtsp_cmd("rtsp://x/out1", fps=30, audio_src=2)
+    assert muxed.count("-use_wallclock_as_timestamps") == 1  # video input only, not audio
+    assert "avfoundation" in muxed and ":2" in muxed and "libopus" in muxed
+
     chunk = mjpeg_chunk(state)
     assert chunk is not None and b"--frame" in chunk and b"image/jpeg" in chunk
 
@@ -390,6 +411,9 @@ def main():
     ap.add_argument("--detect-every", type=int, default=DETECT_EVERY)
     ap.add_argument("--rtsp-out-base", help="e.g. rtsp://localhost:8554/out -> out1..out4")
     ap.add_argument("--ndi-out-base", help="e.g. reframe-out -> reframe-out1..reframe-out4")
+    ap.add_argument("--audio-src", type=int, default=None,
+                     help="avfoundation audio device index to mux into every RTSP channel "
+                          "(see sources.probe_audio_devices(); NDI channels stay video-only)")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--self-test", action="store_true")

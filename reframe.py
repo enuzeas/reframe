@@ -44,6 +44,9 @@ def main():
                      help="run YOLO every Nth frame, reusing the last boxes in between")
     ap.add_argument("--rtsp-out", help="rtsp:// URL to publish tile 0 to (e.g. rtsp://localhost:8554/out1)")
     ap.add_argument("--ndi-out", help="NDI source name to publish tile 0 as (e.g. reframe-out1)")
+    ap.add_argument("--audio-src", type=int, default=None,
+                     help="avfoundation audio device index to mux into --rtsp-out (see "
+                          "sources.probe_audio_devices())")
     ap.add_argument("--no-preview", action="store_true", help="skip the cv2 debug window")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
@@ -72,7 +75,7 @@ def main():
     out_fps = cap.get(cv2.CAP_PROP_FPS) or 30
     publishers = []
     if args.rtsp_out:
-        publishers.append(RTSPPublisher(args.rtsp_out, fps=out_fps))
+        publishers.append(RTSPPublisher(args.rtsp_out, fps=out_fps, audio_src=args.audio_src))
     if args.ndi_out:
         publishers.append(NDIPublisher(args.ndi_out, fps=out_fps))
 

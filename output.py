@@ -7,33 +7,59 @@ import cv2
 from geometry import HD_H, HD_W
 
 
+def rtsp_cmd(url, fps=30, audio_src=None):
+    """Build the ffmpeg argv for RTSPPublisher. Split out so self-tests can check
+    the audio branch without actually spawning ffmpeg."""
+    cmd = ["ffmpeg", "-loglevel", "error", "-y",
+           "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{HD_W}x{HD_H}", "-r", str(fps)]
+    if audio_src is not None:
+        # -use_wallclock_as_timestamps only on the video (stdin) input, which has no
+        # clock of its own - without it, frames would get assumed-constant-rate
+        # timestamps that drift from when they actually arrive. The avfoundation
+        # audio input already carries its own accurate hardware capture clock;
+        # overriding it with wallclock too made libopus see occasional out-of-order
+        # ("Queue input is backward in time") timestamps and silently drop those
+        # frames - confirmed by removing it here and watching the warning disappear.
+        cmd += ["-use_wallclock_as_timestamps", "1", "-i", "-",
+                "-f", "avfoundation", "-i", f":{audio_src}"]
+    else:
+        cmd += ["-i", "-"]
+    cmd += ["-c:v", "h264_videotoolbox", "-realtime", "true", "-bf", "0", "-g", str(fps), "-b:v", "8M"]
+    if audio_src is not None:
+        cmd += ["-c:a", "libopus", "-b:a", "128k", "-ar", "48000"]
+    cmd += ["-f", "rtsp", "-rtsp_transport", "udp", url]
+    return cmd
+
+
 class RTSPPublisher:
-    """Feeds raw BGR frames to an ffmpeg subprocess that publishes h264 over RTSP.
+    """Feeds raw BGR frames to an ffmpeg subprocess that publishes h264 (+ optional
+    Opus audio, muxed from a live avfoundation device) over RTSP.
 
     ponytail: single hardcoded 30fps output rate and videotoolbox encoder (macOS-only).
     Upgrade to a configurable rate/encoder if this needs to run off Apple Silicon.
     """
 
-    def __init__(self, url, fps=30):
-        self.proc = subprocess.Popen(
-            [
-                "ffmpeg", "-loglevel", "error", "-y",
-                "-f", "rawvideo", "-pix_fmt", "bgr24",
-                "-s", f"{HD_W}x{HD_H}", "-r", str(fps), "-i", "-",
-                "-c:v", "h264_videotoolbox", "-realtime", "true", "-bf", "0",
-                "-g", str(fps), "-b:v", "8M",
-                "-f", "rtsp", "-rtsp_transport", "udp", url,
-            ],
-            stdin=subprocess.PIPE,
-        )
+    def __init__(self, url, fps=30, audio_src=None):
+        self.proc = subprocess.Popen(rtsp_cmd(url, fps, audio_src), stdin=subprocess.PIPE)
 
     def write(self, frame):
         """frame must be HD_W x HD_H x 3 BGR (as produced by crop_hd/track_crop)."""
         self.proc.stdin.write(frame.tobytes())
 
     def close(self):
+        """Closing stdin (the video pipe) only EOFs ffmpeg when video is its one
+        live input. With audio_src set, ffmpeg also has a standing avfoundation
+        capture that never EOFs on its own, so wait() would hang forever - kill
+        it instead once given a grace period to flush."""
         self.proc.stdin.close()
-        self.proc.wait(timeout=5)
+        try:
+            self.proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.proc.terminate()
+            try:
+                self.proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
 
 
 class NDIPublisher:
