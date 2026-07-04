@@ -73,17 +73,28 @@ def probe_audio_devices():
 
 def probe_resolutions(index, candidates=RESOLUTION_CANDIDATES):
     """Try each candidate resolution and keep only what the device actually delivers
-    (cv2.VideoCapture.set() silently ignores unsupported sizes instead of erroring)."""
-    cap = cv2.VideoCapture(index)
-    if not cap.isOpened():
-        cap.release()
-        return []
+    (cv2.VideoCapture.set() silently ignores unsupported sizes instead of erroring).
+
+    Opens a fresh capture per candidate rather than reusing one across the whole
+    loop - confirmed live (with cyndilib/NDI loaded in-process, which is always true
+    inside server.py) that AVFoundation's fallback for a rejected resolution isn't
+    clean: it can leave the *session* wedged in a degraded mode that then also fails
+    the next candidate, even a genuinely-supported lower one. E.g. on one camera,
+    requesting 3840x2160 (unsupported) on a still-open capture left it stuck reporting
+    1440p, and the *next* candidate tried on that same capture (1920x1080, which the
+    camera supports natively) then wrongly failed confirmation too - reusing a fresh
+    capture per candidate avoids carrying that wedged state forward.
+    """
     confirmed = []
     for w, h in candidates:
+        cap = cv2.VideoCapture(index)
+        if not cap.isOpened():
+            cap.release()
+            continue
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
         ok, frame = cap.read()
+        cap.release()
         if ok and (frame.shape[1], frame.shape[0]) == (w, h) and (w, h) not in confirmed:
             confirmed.append((w, h))
-    cap.release()
     return confirmed

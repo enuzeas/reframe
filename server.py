@@ -281,22 +281,39 @@ def pipeline_loop(args, state: PipelineState, cmdq: CommandQueue, stop_event: th
     write_pool = ThreadPoolExecutor(max_workers=4)
 
     def open_capture(src, width=None, height=None):
+        # Blindly requesting 4K (the old default) isn't safe on every camera: confirmed
+        # live that a camera whose native default is already a clean 1920x1080 (16:9)
+        # degraded to 1920x1440 (4:3, same width, wrong aspect) the moment 3840x2160 was
+        # explicitly requested and not supported - AVFoundation's fallback for an
+        # unsupported request isn't "reject and keep the current mode," it's "pick some
+        # other mode," and that pick isn't necessarily better than what the camera
+        # already had. Probe actual confirmed candidates (highest first) instead of
+        # asking for 4K and hoping.
+        candidates = [(width, height)] if width and height else (
+            sources.probe_resolutions(src) if isinstance(src, int) else []
+        )
         cap = cv2.VideoCapture(src)
         # Default internal buffer holds a few frames - fine for playback, but for a live
         # pipeline it just adds latency (each read() can return an already-stale buffered
         # frame instead of the newest one). Not all backends honor this, but AVFoundation
         # does.
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        # Request the highest resolution by default (cv2.VideoCapture.set() silently
-        # falls back to whatever the device actually supports - see sources.py - so this
-        # is safe even on cameras that can't do 4K). Without this, a camera opened with
-        # no explicit request just keeps whatever low-res default it powers on with -
-        # confirmed live: this exact gap left a 1080p-capable camera stuck at 640x480
-        # for an entire session because only the /api/input resolution-switch path ever
-        # set width/height, never the initial open.
-        w, h = (width, height) if width and height else (3840, 2160)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+        # Setting the resolution on *this* capture isn't guaranteed to reproduce what
+        # probe_resolutions() just confirmed on its own short-lived captures - confirmed
+        # live that under real pipeline load (YOLO inference + 4 ffmpeg/NDI publishers
+        # all running) the same camera that cleanly probes at 1920x1080 can still land
+        # on a lower fallback here, apparently a timing/negotiation race rather than a
+        # hard capability limit. Verify by actually reading a frame and retry with a
+        # short delay (to give the driver time to finish negotiating under load) before
+        # falling through to the next-best confirmed candidate.
+        for w, h in candidates:
+            for _ in range(4):
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+                ok, frame = cap.read()
+                if ok and (frame.shape[1], frame.shape[0]) == (w, h):
+                    return cap
+                time.sleep(0.15)
         return cap
 
     src = int(args.src) if args.src.isdigit() else args.src
