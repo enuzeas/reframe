@@ -268,7 +268,15 @@ function connectWs() {
     boxes = overlay.boxes ?? [];
     frameW = overlay.frame_w ?? frameW;
     frameH = overlay.frame_h ?? frameH;
-    channelsState = overlay.channels ?? [];
+    // Keep a just-edited channel's edited fields for a short window even once the
+    // server starts broadcasting again - the first broadcast or two after any PATCH
+    // still reflects the pre-command state (queue hasn't drained yet), so without this
+    // the incoming data would overwrite the optimistic update right back.
+    channelsState = (overlay.channels ?? []).map(nc => {
+      const edit = recentEdits[nc.id];
+      if (edit && Date.now() < edit.until) return { ...nc, ...edit.fields };
+      return nc;
+    });
     document.getElementById("fps").textContent = overlay.fps ?? "-";
     // Drawing itself now happens continuously in the requestAnimationFrame loop below,
     // which eases toward whatever channelsState holds - no need to draw here too.
@@ -380,7 +388,7 @@ window.addEventListener("pointerup", () => {
   patchChannel(dragging.id, {
     x: Math.round(d.x * frameW), y: Math.round(d.y * frameH),
     w: Math.round(d.w * frameW), h: Math.round(d.h * frameH),
-  });
+  }, { x: d.x, y: d.y, w: d.w, h: d.h }); // normalized, matches channelsState's units
   dragging = null;
 });
 
@@ -391,16 +399,27 @@ window.addEventListener("keydown", (e) => {
 });
 
 // ---- API calls ----
-async function patchChannel(id, body) {
-  // Apply locally first: the WS overlay ticks at 10Hz regardless of this request's
-  // round trip, and the server only applies the command on its next render frame -
-  // so a broadcast reflecting the still-old state can arrive and overwrite the click
-  // back to its previous value before the real update ever shows up. Toggling
-  // tracking or changing the zoom preset looked like it "didn't work" (or worse,
-  // flip-flopped) for exactly this reason. Same fix as the existing drag-override
-  // pattern (`dragging.current`), just for click/select actions instead of drags.
+// channelId -> {until: timestamp, fields: {...}}. The WS overlay ticks at 10Hz
+// regardless of a PATCH's round trip, and the server only applies the command on its
+// next render frame - so at least one broadcast reflecting the still-old state
+// reliably arrives before the real update does. A one-shot local overwrite (the
+// original fix) only survives until that first stale broadcast overwrites it right
+// back - fine as a near-invisible ~100ms blip for a discrete value like a boolean
+// toggle, but glaring for position/size: the 60fps lerp actually animates the box
+// sliding back toward the old spot and re-approaching, which reads as "flew in from
+// the wrong place" right after a drop. Protect the edited fields for a full window
+// instead of just one optimistic write.
+const recentEdits = {};
+async function patchChannel(id, body, localOverride) {
+  // localOverride exists because `body` isn't always in the same units as
+  // channelsState: a drag's pointerup sends x/y/w/h in *pixels* (what the server API
+  // expects), but channelsState is normalized 0-1 everywhere else. Blindly assigning
+  // pixel values in gave displayPos a momentarily huge, wrong lerp target (e.g.
+  // x=1920 instead of 0.5) until the next real WS update corrected it.
+  const fields = localOverride ?? body;
+  recentEdits[id] = { until: Date.now() + 500, fields };
   const c = channelsState.find(ch => ch.id === id);
-  if (c) Object.assign(c, body);
+  if (c) Object.assign(c, fields);
   renderPanel();
   await fetch(`/api/channels/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 }
