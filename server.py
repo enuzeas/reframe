@@ -21,6 +21,7 @@ import argparse
 import asyncio
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import cv2
@@ -269,6 +270,13 @@ def pipeline_loop(args, state: PipelineState, cmdq: CommandQueue, stop_event: th
 
     model = YOLO(args.model)
     device = "mps" if torch.backends.mps.is_available() else "cpu"
+    # Writing each channel's tile to its own ffmpeg subprocess is blocking I/O on an
+    # independent OS pipe per channel - no data dependency between them, and a
+    # blocking write() releases the GIL, so threads give real parallelism here despite
+    # Python's GIL. Measured: 4 channels written sequentially cost ~12ms/frame; this
+    # write() is the second-biggest chunk of frame time after detection, and unlike
+    # detection there's no accuracy/responsiveness to trade away to speed it up.
+    write_pool = ThreadPoolExecutor(max_workers=4)
 
     def open_capture(src, width=None, height=None):
         cap = cv2.VideoCapture(src)
@@ -324,8 +332,9 @@ def pipeline_loop(args, state: PipelineState, cmdq: CommandQueue, stop_event: th
 
         tiles = render_channels(frame, people, channel_list)
         outputs.sync([c.id for c in channel_list])
-        for c in channel_list:
-            outputs.write(c.id, tiles[c.id])
+        futures = [write_pool.submit(outputs.write, c.id, tiles[c.id]) for c in channel_list]
+        for f in futures:
+            f.result()
 
         dt, t0 = time.time() - t0, time.time()
         fps = 0.9 * fps + 0.1 * (1 / dt) if dt > 0 else fps
@@ -351,6 +360,7 @@ def pipeline_loop(args, state: PipelineState, cmdq: CommandQueue, stop_event: th
 
     cap.release()
     outputs.close_all()
+    write_pool.shutdown(wait=False)
 
 
 def self_test():
