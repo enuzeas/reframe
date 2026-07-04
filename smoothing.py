@@ -6,19 +6,15 @@ ONEEURO_MIN_CUTOFF = 3.0  # ponytail: bumped from 1.0 (2026-07-04 live test) - a
                           # filter treated ordinary head movement as noise to suppress,
                           # only reacting to fast/large moves (subject leaving frame).
                           # lower = smoother but laggier; raise further if still sluggish.
-ONEEURO_BETA = 0.02       # ponytail: dropped 0.7->0.15->0.02 (2026-07-04) - beta scales
-                          # cutoff by *velocity*, so any nonzero value lets ordinary
-                          # detection noise (a person naturally swaying, YOLO bbox jitter
-                          # frame-to-frame) read as "fast movement" and pass through,
-                          # independent of min_cutoff. 0.15 wasn't low enough per live
-                          # feedback; synthetic-signal test of the full range showed beta
-                          # is what actually controls jitter here (min_cutoff barely moves
-                          # it), with jitter dropping monotonically all the way to beta=0
-                          # (0.74 vs 4.13 at the original 0.7) for a still-modest lag
-                          # increase (~3.5 vs ~0.8, a few frames at typical fps). Left just
-                          # above 0 rather than exactly 0 to keep a sliver of fast-motion
-                          # responsiveness (leaving frame, sudden large moves) rather than
-                          # a pure constant-cutoff low-pass filter.
+ONEEURO_BETA = 0.0        # ponytail: dropped 0.7->0.15->0.02->0.0 (2026-07-04) - beta scales
+                          # cutoff by *velocity*, i.e. it exists specifically to react
+                          # faster/less-smoothed during fast movement. Explicit user
+                          # preference: fast movement is fine to lag behind smoothly rather
+                          # than snap to catch up, so that whole mechanism is unwanted here,
+                          # not just "turned down". At 0.0 the filter is a plain constant-
+                          # cutoff low-pass - min_cutoff (the UI's smoothing slider) is now
+                          # the only thing controlling responsiveness, uniformly regardless
+                          # of how fast the target is moving.
 ONEEURO_D_CUTOFF = 1.0    # derivative cutoff, rarely needs tuning
 
 
