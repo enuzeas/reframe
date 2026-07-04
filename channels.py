@@ -21,7 +21,12 @@ ZOOM_MULT = {"full": 1.3, "waist": 0.7, "face": 0.35}  # reuses modes.py's rende
 # previous approach (center on the whole-body midpoint always, then clamp upward
 # after the fact so a tight crop doesn't slice the head off) with picking the right
 # point to begin with.
-ANCHOR_FRAC = {"full": 0.5, "waist": 0.28, "face": 0.10}
+# face=0.10 -> 0.16: confirmed live the bbox isn't always a full standing body (a
+# close webcam framing gives a "person" box that's already mostly head/upper-torso),
+# so 0.10 landed too high and cropped into the forehead/hair, missing the lower face.
+# This is inherently a per-setup approximation without a real face detector - revisit
+# if a different camera distance/mounting needs a different value.
+ANCHOR_FRAC = {"full": 0.5, "waist": 0.28, "face": 0.16}
 MIN_CROP_FRACTION = 0.5  # same rationale as tracking.py's constant - frame-relative floor
 DEFAULT_W = 1440         # new-channel default width (source coords), matches mockup
 
