@@ -43,6 +43,20 @@ OVERLAY_HZ = 10
 PREVIEW_MAX_WIDTH = 1280
 MODE_TO_PRESET = {1: "multi", 2: "quad", 3: "single"}
 SAVE_DEBOUNCE_S = 2.0  # persist channel layout at most this often (INFRA-PLAN §8)
+READ_FAIL_THRESHOLD = 30  # ~3s of failed reads (0.1s sleep each) before reopening
+
+
+def _should_reopen(source, consecutive_failures, threshold=READ_FAIL_THRESHOLD):
+    """True once a camera source has failed to read for `threshold` frames straight.
+
+    macOS/AVFoundation can permanently wedge a VideoCapture opened before the OS
+    camera-permission prompt is answered (confirmed live: granting permission in
+    System Settings mid-run never unwedges the existing capture, only a freshly
+    opened one) - reopening lets the pipeline recover on its own instead of
+    requiring a manual server restart. Video-file sources are exempt: EOF is
+    expected there, not a permission failure.
+    """
+    return isinstance(source, int) and consecutive_failures >= threshold
 
 
 def mjpeg_chunk(state: PipelineState):
@@ -332,6 +346,7 @@ def pipeline_loop(args, state: PipelineState, cmdq: CommandQueue, stop_event: th
 
     src = int(args.src) if args.src.isdigit() else args.src
     cap = open_capture(src)
+    current_src = src
     state.update(source_id=src if isinstance(src, int) else None)
 
     out_fps = cap.get(cv2.CAP_PROP_FPS) or 30
@@ -341,12 +356,19 @@ def pipeline_loop(args, state: PipelineState, cmdq: CommandQueue, stop_event: th
     fps, t0 = 0.0, time.time()
     people, frame_idx = [], 0
     layout_dirty, last_save = False, 0.0
+    read_failures = 0
 
     while not stop_event.is_set():
         ok, frame = cap.read()
         if not ok:
+            read_failures += 1
+            if _should_reopen(current_src, read_failures):
+                cap.release()
+                cap = open_capture(current_src)
+                read_failures = 0
             time.sleep(0.1)
             continue
+        read_failures = 0
         fh, fw = frame.shape[:2]
 
         if channel_list is None:
@@ -361,6 +383,8 @@ def pipeline_loop(args, state: PipelineState, cmdq: CommandQueue, stop_event: th
             if cmd["type"] == "switch_input":
                 cap.release()
                 cap = open_capture(cmd["source_id"], cmd.get("width"), cmd.get("height"))
+                current_src = cmd["source_id"]
+                read_failures = 0
                 state.update(source_id=cmd["source_id"])
             else:
                 _apply_command(cmd, channel_list, people, fw, fh)
@@ -516,6 +540,9 @@ def self_test():
     with client.websocket_connect("/ws") as ws:
         data = ws.receive_json()
         assert data["fps"] == 30.0
+
+    assert _should_reopen(0, READ_FAIL_THRESHOLD) and not _should_reopen(0, READ_FAIL_THRESHOLD - 1)
+    assert not _should_reopen("video.mp4", 9999)  # file EOF isn't a permission wedge
 
     print("server self-test OK")
 
