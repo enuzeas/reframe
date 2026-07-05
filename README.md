@@ -17,7 +17,10 @@ median pre-filter. macOS / Apple Silicon (MPS), single process.
 - [Homebrew](https://brew.sh) — for `ffmpeg` and `mediamtx`
 - A UVC 4K capture source (e.g. Elgato Cam Link 4K) or any camera OpenCV can open
 - **NDI output only:** NDI SDK runtime (`libndi.dylib`) via [NDI Tools](https://ndi.video/tools/)
-  — proprietary, not brew-installable. RTSP output does not need it.
+  — proprietary, not brew-installable. RTSP output does not need it. cyndilib bundles its own
+  `libndi.dylib`, so reframe's NDI *sending* works without this - it's needed for OBS to
+  *receive* NDI at all, via the [DistroAV](https://github.com/DistroAV/DistroAV/) plugin
+  (formerly obs-ndi).
 
 ## Install
 
