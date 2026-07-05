@@ -69,8 +69,11 @@ input[type=range] { accent-color: var(--ch-color, var(--accent)); }
 .zoom-opt { flex: 1; min-width: 0; padding: 6px 2px; font-size: 11px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text-dim); cursor: pointer; }
 .zoom-opt.active { background: var(--ch-color, var(--accent)); color: #0b0d12; border-color: var(--ch-color, var(--accent)); font-weight: 700; }
 .zoom-opt:disabled { opacity: .4; cursor: not-allowed; }
-.url-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
+.url-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; cursor: pointer; }
+.url-row:hover { border-color: var(--accent); }
 .url-row code { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-dim); }
+.url-row.copied { border-color: var(--accent); }
+.url-row.copied code { color: var(--accent); }
 .add-frame-card { border: 1px dashed var(--border); border-radius: var(--radius); display: flex; align-items: center; justify-content: center; color: var(--text-dim); padding: 16px; cursor: pointer; font-size: 13px; gap: 6px; }
 .add-frame-card:hover { border-color: var(--accent); color: var(--accent); }
 .add-frame-card.disabled { opacity: .4; cursor: not-allowed; }
@@ -465,6 +468,16 @@ document.querySelectorAll(".presets button").forEach(b => b.addEventListener("cl
 // base configured. NDI-only setups have no RTSP base at all.
 function channelUrl(c) { return rtspOutBase ? `${rtspOutBase}${c.id}` : "(RTSP 미설정)"; }
 
+function copyUrlRow(row, url) {
+  navigator.clipboard.writeText(url).then(() => {
+    const code = row.querySelector("code");
+    const original = code.textContent;
+    row.classList.add("copied");
+    code.textContent = "복사됨";
+    setTimeout(() => { row.classList.remove("copied"); code.textContent = original; }, 1000);
+  });
+}
+
 function renderPanel() {
   const list = document.getElementById("channelList");
   list.innerHTML = "";
@@ -507,9 +520,14 @@ function renderPanel() {
         <label><span>스무딩 (One Euro)</span><span>${c.smoothing}</span></label>
         <input type="range" min="0" max="100" value="${c.smoothing}" data-action="smoothing" ${!c.tracking ? "disabled" : ""}>
       </div>
-      <div class="url-row"><code>${channelUrl(c)}</code></div>
+      <div class="url-row" title="클릭하여 복사"><code>${channelUrl(c)}</code></div>
     `;
 
+    card.querySelector('.url-row').addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      if (!rtspOutBase) return; // "(RTSP 미설정)" - nothing to copy
+      copyUrlRow(ev.currentTarget, channelUrl(c));
+    });
     card.querySelector('[data-action=delete]').addEventListener("click", (ev) => { ev.stopPropagation(); deleteChannel(c.id); });
     card.querySelector('[data-action=toggle-track]').addEventListener("click", (ev) => {
       ev.stopPropagation();
