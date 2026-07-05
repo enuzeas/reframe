@@ -46,6 +46,11 @@ class Channel:
         self.smoothing = smoothing
         self.smoother = Smoother(min_cutoff=smoothing_to_min_cutoff(smoothing))
         self.presence = Presence()
+        # "manual" zoom's frozen crop height - deliberately separate from self.h, which
+        # the full-frame safety fallback below overwrites whenever a target is missing/
+        # unbound. manual mode used to just read back self.h, so one waiting period or
+        # one lost-track event permanently corrupted its "fixed" size to full-frame.
+        self.manual_h = h
         self.status = "live"
 
     def set_smoothing(self, value):
@@ -90,7 +95,12 @@ def render_channel(frame, people_by_id, channel):
         return tile
 
     bbox = people_by_id.get(channel.target_id) if channel.target_id is not None else None
-    resolved, widen = channel.presence.resolve(key, bbox)
+    # "manual" never times out to the full-frame fallback once a target's been seen -
+    # the whole point of manual is a framing the user picked on purpose, and blowing
+    # that out to a wide shot because the subject turned away for a couple seconds is
+    # the opposite of "fixed". Holds the last known position indefinitely instead.
+    hold_frames = float("inf") if channel.zoom == "manual" else None
+    resolved, widen = channel.presence.resolve(key, bbox, hold_frames=hold_frames)
     if resolved is None:
         # No target bound yet, or lost longer than Presence's hold window - never show
         # a bare gray placeholder on an actual broadcast output (that's a broadcast
@@ -134,7 +144,10 @@ def render_channel(frame, people_by_id, channel):
         # even a real occlusion) inflated a 360px-tall manual box to full frame height
         # and it never recovered even after 10 more frames of clean redetection.
         # Manual mode should just hold the size the user picked; widen doesn't apply.
-        target_h = channel.h
+        # Reads manual_h, not self.h - self.h gets overwritten by the full-frame
+        # fallback (e.g. the "waiting to bind" period before target_id is set), which
+        # would otherwise corrupt this "fixed" size the same way widen used to.
+        target_h = channel.manual_h
         ch_h = channel.smoother.scalar(f"{key}:h", target_h)
     tile = crop_hd(frame, cx, cy, ch_h)
     channel.x, channel.y, channel.w, channel.h = clamp_window(cx, cy, ch_h * 16 / 9, ch_h, fw, fh)

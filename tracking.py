@@ -51,12 +51,13 @@ class Presence:
         self.last = {}
         self.missing = {}
 
-    def resolve(self, key, bbox):
+    def resolve(self, key, bbox, hold_frames=None):
+        hold_frames = self.hold_frames if hold_frames is None else hold_frames
         if bbox is not None:
             self.last[key] = bbox
             self.missing[key] = 0
             return bbox, 1.0
-        if key in self.last and self.missing.get(key, 0) < self.hold_frames:
+        if key in self.last and self.missing.get(key, 0) < hold_frames:
             self.missing[key] = self.missing.get(key, 0) + 1
             return self.last[key], WIDEN_PER_FRAME ** self.missing[key]
         self.last.pop(key, None)

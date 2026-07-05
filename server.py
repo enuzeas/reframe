@@ -271,9 +271,13 @@ def _apply_command(cmd, channel_list, people, fw, fh):
         c = next((c for c in channel_list if c.id == cmd["id"]), None)
         if c is None:
             return
+        if cmd.get("zoom") == "manual" and c.zoom != "manual":
+            c.manual_h = c.h  # freeze at whatever size it was showing when switched to manual
         for field in ("x", "y", "w", "h", "tracking", "target_id", "zoom"):
             if field in cmd:
                 setattr(c, field, cmd[field])
+        if "h" in cmd:
+            c.manual_h = cmd["h"]  # explicit resize redefines the frozen target too
         if "smoothing" in cmd:
             c.set_smoothing(cmd["smoothing"])
     elif cmd["type"] == "delete_channel":
@@ -462,6 +466,18 @@ def self_test():
     assert tracked.y <= 200  # crop top stays above the head (y1=200), anchor-based framing
     assert ch._status(tracked, {7: bbox}) == "live"
     assert ch._status(tracked, {}) == "lost"  # target currently undetected
+
+    # manual zoom + tracking: losing the target (even past the normal hold window)
+    # must not blow the crop out to full frame - it holds the last known framing at
+    # the fixed size instead. Previously "manual" read back self.h, which the
+    # full-frame fallback overwrites, permanently corrupting the "fixed" size.
+    manual_ch = ch.Channel(5, 800, 300, 400, 225, tracking=True, target_id=7, zoom="manual")
+    ch.render_channel(frame, {7: bbox}, manual_ch)
+    assert manual_ch.h == 225
+    for _ in range(50):  # far past tracking.HOLD_FRAMES (30)
+        ch.render_channel(frame, {}, manual_ch)
+    assert manual_ch.h == 225
+    assert ch._status(manual_ch, {}) == "lost"  # status still reflects reality
 
     # waist and face must not collapse to the same size for an ordinary (non-distant)
     # bbox - previously both landed on the same shared MIN_CROP_FRACTION floor
