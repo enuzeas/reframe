@@ -117,7 +117,17 @@ class NDIPublisher:
         self.video_frame.set_frame_rate(Fraction(fps).limit_denominator())
         self.video_frame.set_fourcc(FourCC.BGRX)
 
-        self.sender = Sender(ndi_name=name)
+        # clock_video=False: cyndilib defaults to pacing write_video() to the frame
+        # rate set above - fine if that rate is trustworthy, but `fps` here is the
+        # camera's own self-reported CAP_PROP_FPS (server.py), which some webcams
+        # under-report (confirmed live: a built-in camera claimed 15fps at 640x480,
+        # and with clocking on that throttled every write_video() call to ~66ms,
+        # dragging the *entire* pipeline loop - capture/detect/render included, since
+        # write() is awaited synchronously - down to that same ~15fps). RTSPPublisher
+        # already sidesteps this failure mode with wallclock timestamps instead of a
+        # trusted declared rate; disabling the clock here is the NDI equivalent - send
+        # frames as fast as they're produced and let receivers pace off arrival time.
+        self.sender = Sender(ndi_name=name, clock_video=False)
         self.sender.set_video_frame(self.video_frame)
         self.sender.open()
 
