@@ -76,6 +76,11 @@ Channels publish independently:
 Add each as a source in OBS. **Prefer NDI** — lower and steadier latency (~400ms vs RTSP's
 larger, jittery buffering).
 
+NDI Source properties: **Action → "Always play when not visible"**, **Latency → "Lowest
+(unbuffered)"**. Without the first, OBS deactivates/reconnects the NDI receiver whenever its
+scene isn't visible, so cutting to it freezes on the first frame for a beat before catching
+up.
+
 `--src` takes a camera index or a video file. `--mode 1|2|3` sets the startup preset only
 (change live via the console); it's ignored once a saved layout exists (see Persistence).
 
